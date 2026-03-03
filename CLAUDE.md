@@ -5,12 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ```bash
-# Start hyperliquid-bot in watch mode (registered in nest-cli.json)
-npm run start:dev:hyperliquid-bot
+# Start insider-scanner in watch mode
+npm run start:dev:insider-scanner
 
 # Build specific app
-nest build hyperliquid-bot
-nest build hyper-rau
+nest build insider-scanner
+nest build data-analytics
 
 # Format, lint, test
 npm run format
@@ -24,83 +24,77 @@ npx jest path/to/file.spec.ts
 
 ## Monorepo Structure
 
-NestJS monorepo with two active trading apps in `apps/`:
+NestJS monorepo with 2 active apps in `apps/`:
 
 | App | Port | Config source |
 |-----|------|---------------|
-| `hyperliquid-bot` | 3233 | Hardcoded in `ListenerService` |
-| `hyper-rau` | `PORT` env var | Redis (`SOPConfig` via `TAG` env) |
+| `data-analytics` | 3234 | `PORT` env var |
+| `insider-scanner` | 3235 | `WEB_PORT` env var |
 
-Only `hyperliquid-bot` is registered in `nest-cli.json`. The `hyper-rau` app must be built/run with `nest build hyper-rau` / `nest start hyper-rau`.
+Both apps registered in `nest-cli.json`.
 
-## hyperliquid-bot Architecture
+## insider-scanner Architecture
 
-Simpler, self-contained bot with trading pairs and credentials hardcoded in `listener/listener.service.ts`. No external config source.
+Real-time scanner detecting insider trading patterns on Hyperliquid.
 
-- `ListenerService` — polls Hyperliquid REST API every 2s via `@Cron`. Places grid orders (long + short brackets) around current price, manages positions, takes profit at ±4.5%/5%.
-- `HyperliquidSdkService` — signs and sends all exchange requests; uses EIP-712 phantom agent signatures via `ethers`.
-- `HYPERLIQUID_CONFIG` — built at startup from `hyperliquid-pair-data.ts` (static snapshot of Hyperliquid's universe), maps symbol → `{index, szDecimals, maxLeverage}`.
+- `WsScannerService` — subscribes to Hyperliquid WebSocket `trades` channel for all perp coins; sliding-window aggregation (500ms + 3s cap) to merge partial fills.
+- `InsiderDetectorService` — composite scoring engine (0–100); MM/HFT filter via Copin API; maintains suspects map and large trades rolling window.
+- `RateLimiterService` — sequential queue with 1100ms delay between REST calls.
+- `HyperliquidInfoService` — read-only REST client; POST `/info` for fills, ledger, positions; POST `https://hyper.copin.io/info` for fee tier.
+- `LarkAlertService` — Lark webhook alerts with AlertLevel color coding.
+- `AppController` — `GET /` dashboard HTML; `GET /api/state` JSON state.
 
-## hyper-rau Architecture
+### Scoring Engine
 
-Production-grade bot driven entirely by Redis config — no restart needed to change pairs or parameters.
+Composite score A+B+C+D+E × F (0–100):
 
-### Data Flow
+| Component | Max | Signal |
+|-----------|-----|--------|
+| A: Deposit-to-Trade Speed | 25 | Gap between last deposit and trade detection time |
+| B: Wallet Freshness | 20 | Wallet age + 90-day fill count |
+| C: Trade Size vs Market | 20 | Notional vs 24h volume + OI ratio |
+| D: Position Concentration | 15 | Margin utilization + implied leverage |
+| E: Ledger Purity | 10 | Deposit-only wallet, no withdrawals |
+| F: Multiplier | ×1.0–1.5 | Combo bonuses (immediate + fresh + all-in) |
 
-```
-Redis (SOPConfig) ──► GlobalStateService ──► OrderManagementService
-                                                     │
-Hyperliquid WS ──► WsService ──────────────────────►│──► PlaceOrderService ──► HyperliquidSdkService
-  l2Book, openOrders, userFills, positions            │
-                                                 CacheService (Redis)
-```
+### MM/HFT Filter
 
-### Key Services
+- **Layer 0**: Skip `0x000...000` (zero address) in `bufferTrade()`
+- **Layer 1**: Copin API `userAddRate <= 0` → maker rebate tier → skip inspection, flag `HFT`
+- **Cache**: HFT status cached 24h per address
 
-| Service | File | Role |
-|---------|------|------|
-| `WsService` | `listener/ws.service.ts` | WebSocket lifecycle, routes messages, pings every 5s |
-| `GlobalStateService` | `listener/global-state.service.ts` | In-memory state; polls Redis for `SOPConfig` every 1s, pair metadata every 5s |
-| `OrderManagementService` | `listener/order-management.service.ts` | Core trading logic: grid setup, order modification, position/TP management |
-| `PlaceOrderService` | `listener/place-order.service.ts` | Wraps cancel/close HTTP calls; holds API key credentials |
-| `HyperliquidSdkService` | `frameworks/hyperliquid/` | Same EIP-712 signing as hyperliquid-bot |
-| `CacheService` | `frameworks/cache-service/` | Redis client wrapper (hashes, sets, sorted sets, queues) |
-| `CrawlCexTradeConfigService` | `crawl-cex-info/` | Hourly cron fetching pair metadata from Bybit, Binance, OKX, BingX, Gate, Bitget, Hyperliquid into Redis |
-
-### Redis Config Schema (`SOPConfig`)
+### Key Enums (`trade.dto.ts`)
 
 ```ts
-{
-  isEnable: boolean,         // master on/off; checked every second
-  timeAutoClose: number,     // seconds before force-closing unfilled position
-  timeDelay: number,         // ms delay before modifying orders
-  pairConfigs: [{
-    symbol: string,          // e.g. "BTC"
-    percent: number[],       // grid levels, e.g. [1, 2, 3]
-    takeProfitPercent: number[],
-    totalVolume: number,     // total USDT allocated
-    ratio: number[],         // volume weight per grid level
-    isLong?: boolean,        // long-only if true
-    minTpPercent?: number,   // minimum ROI% to trigger IOC close
-  }]
-}
+AlertLevel: CRITICAL(≥75) | HIGH(≥55) | MEDIUM(≥40) | LOW(≥25) | NONE
+WalletType: GHOST | ONE_SHOT | FRESH | SUB_ACCOUNT | WHALE | NORMAL
+InsiderFlag: LARGE | MEGA | NEW_ACCT | FIRST | FRESH_DEP | DEP_ONLY |
+             GHOST | ONE_SHOT | ALL_IN | HIGH_LEV | DEAD_MKT | HIGH_OI | HFT
 ```
 
-Pair metadata is stored in Redis hash `pairsByExchange_HYPERLIQUID`.
+### Environment Variables (insider-scanner)
 
-### Environment Variables (hyper-rau)
+```
+WEB_PORT=3235          # HTTP port (Railway uses PORT env automatically)
+HYPER_WS_URL           # default: wss://api.hyperliquid.xyz/ws
+HYPER_API_URL          # default: https://api.hyperliquid.xyz
+MIN_TRADE_USD          # default: 100000
+MEGA_TRADE_USD         # default: 1000000
+LARK_WEBHOOK_URL       # optional Lark bot webhook
+REST_RATE_LIMIT_MS     # default: 1100
+```
 
-Required in `.env`:
-- `PORT`, `TAG`
-- `API_KEY_RAU_1`, `SECRET_KEY_RAU_1`, `PASS_PHRASE_RAU_1` (optional vault address)
-- `HYPER_WS_URL` (default: `wss://api.hyperliquid.xyz/ws`)
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`
+## data-analytics Architecture
+
+Read-only analytics platform for Hyperliquid trader data.
+
+- REST API: trader stats, positions, fills, funding, market data, leaderboard
+- Redis cache for market snapshots (1 min) and leaderboards (5 min)
+- No signing/credentials needed
 
 ## Shared Patterns
 
-**Grid/Bracket Strategy:** For each `percent[i]`, places a long limit at `bidPrice * (1 - percent/100)` and a short limit at `askPrice * (1 + percent/100)`. Order size = `(totalVolume / weightedSum) * ratio[i] * percent[i] / price`. Orders are modified when price moves >10% of the grid level from last placement price.
-
-**Order Signing:** All exchange actions use EIP-712 phantom agent signatures. Action payload is msgpack-encoded + keccak256 hashed → signed with `ethers.Wallet.signTypedData`. Vault address appended when `passPhrase` is set.
+**Order Signing:** EIP-712 phantom agent signatures. Action payload msgpack-encoded + keccak256 hashed → signed with `ethers.Wallet.signTypedData`. Vault address appended when `passPhrase` is set.
 
 **Price Rounding:** `hyperliquidRoundPrice()` rounds to 5 significant digits, capped at `max(0, 6 - szDecimals)` decimal places.
 
@@ -109,3 +103,28 @@ Required in `.env`:
 - `@SafeFunctionGuard()` — wraps async methods in try/catch to swallow errors
 
 **`lossless-json`** is used to parse Hyperliquid API responses to avoid precision loss on large integers.
+
+**WebSocket import:** Use `import WebSocket = require('ws')` (not named import) in webpack-built apps.
+
+## Hyperliquid API Reference
+
+Base: `https://api.hyperliquid.xyz` — All info requests: `POST /info`
+
+```typescript
+{"type": "metaAndAssetCtxs"}                           // All tokens metadata + market context
+{"type": "userFills", "user": "0x..."}                  // Trade history
+{"type": "userFillsByTime", "user": "0x...", "startTime": ms, "endTime": ms}
+{"type": "clearinghouseState", "user": "0x..."}         // Positions + margin
+{"type": "userNonFundingLedgerUpdates", "user": "0x..."}// Deposits, withdrawals, transfers
+{"type": "l2Book", "coin": "BTC"}                       // Orderbook snapshot
+```
+
+Copin API: `POST https://hyper.copin.io/info` with `{"type":"userFees","user":"0x..."}` → `{userAddRate, userCrossRate}`
+
+Rate limit: ~1200 req/min. Use 1100ms sequential queue for REST calls.
+
+## Deployment
+
+- **GitHub**: https://github.com/duyentb95/claude-practices
+- **Railway**: https://insider-scanner-production.up.railway.app
+- **Deploy**: `/deploy` slash command or `railway up --detach`

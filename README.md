@@ -1,13 +1,11 @@
-# Hyperliquid Trading Bots — NestJS Monorepo
+# Hyperliquid Insider Scanner — NestJS Monorepo
 
-NestJS monorepo chứa các trading bots và analytics tools cho Hyperliquid DEX.
+NestJS monorepo chứa analytics tools cho Hyperliquid DEX.
 
 ## Apps
 
 | App | Port | Mô tả |
 |-----|------|--------|
-| `hyperliquid-bot` | 3233 | Grid trading bot, credentials hardcoded |
-| `hyper-rau` | `PORT` env | Production bot driven by Redis config |
 | `data-analytics` | 3234 | Read-only analytics API cho trader data |
 | `insider-scanner` | 3235 | Real-time insider trade scanner (web UI) |
 
@@ -46,6 +44,8 @@ docker compose up --build
 3. Set environment variables (từ `.env.example`)
 4. Railway tự detect `Dockerfile` và build
 
+**Production**: https://insider-scanner-production.up.railway.app
+
 ### Environment Variables
 
 Xem `.env.example` để biết đầy đủ biến cần thiết.
@@ -74,8 +74,6 @@ npm run test
 
 ```
 apps/
-  hyperliquid-bot/     Grid bot (standalone)
-  hyper-rau/           Production bot (Redis-driven)
   data-analytics/      Analytics REST API
   insider-scanner/     Insider trade scanner
     src/
