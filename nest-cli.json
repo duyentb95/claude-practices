@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/listener/src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "webpack": true,
+    "tsConfigPath": "apps/listener/tsconfig.app.json"
+  },
+  "monorepo": true,
+  "root": "apps/listener",
+  "projects": {
+    "hyperliquid-bot": {
+      "type": "application",
+      "root": "apps/hyperliquid-bot",
+      "entryFile": "main",
+      "sourceRoot": "apps/hyperliquid-bot/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/hyperliquid-bot/tsconfig.app.json"
+      }
+    },
+    "data-analytics": {
+      "type": "application",
+      "root": "apps/data-analytics",
+      "entryFile": "main",
+      "sourceRoot": "apps/data-analytics/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/data-analytics/tsconfig.app.json"
+      }
+    },
+    "insider-scanner": {
+      "type": "application",
+      "root": "apps/insider-scanner",
+      "entryFile": "main",
+      "sourceRoot": "apps/insider-scanner/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/insider-scanner/tsconfig.app.json"
+      }
+    }
+  }
+}

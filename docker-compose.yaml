@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  insider-scanner:
+    container_name: insider-scanner
+    build:
+      context: .
+      args:
+        - APP_NAME=insider-scanner
+    restart: always
+    ports:
+      - "${WEB_PORT:-3235}:3235"
+    environment:
+      - WEB_PORT=3235
+      - HYPER_WS_URL=${HYPER_WS_URL:-wss://api.hyperliquid.xyz/ws}
+      - HYPER_API_URL=${HYPER_API_URL:-https://api.hyperliquid.xyz}
+      - MIN_TRADE_USD=${MIN_TRADE_USD:-100000}
+      - MEGA_TRADE_USD=${MEGA_TRADE_USD:-1000000}
+      - LARK_WEBHOOK_URL=${LARK_WEBHOOK_URL}
+    env_file:
+      - .env

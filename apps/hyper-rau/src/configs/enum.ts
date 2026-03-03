@@ -1,0 +1,17 @@
+export enum REDIS_KEY {
+  PAIRS_BY_EXCHANGE = 'pairsByExchange',
+  LISTENER_CONFIG = 'CONFIG',
+}
+
+export enum EXCHANGE {
+  GATE = 'GATE',
+  APEX = 'APEX',
+  COINEX = 'COINEX',
+  BITGET = 'BITGET',
+  BINGX = 'BINGX',
+  OKX = 'OKX',
+  BINANCE = 'BINANCE',
+  LIGHTER = 'LIGHTER',
+  BYBIT = 'BYBIT',
+  HYPERLIQUID = 'HYPERLIQUID',
+}
