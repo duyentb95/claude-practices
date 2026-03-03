@@ -26,6 +26,7 @@ RUN npm ci --legacy-peer-deps --omit=dev
 COPY --from=builder /usr/src/app/dist/apps/${APP_NAME}/main.js ./dist/apps/${APP_NAME}/main.js
 
 ENV NODE_ENV=production
+ENV APP_NAME=${APP_NAME}
 EXPOSE 3235
 
-CMD node dist/apps/${APP_NAME}/main
+CMD node dist/apps/insider-scanner/main
