@@ -28,3 +28,6 @@ Thumbs.db
 
 # Nest / webpack cache
 .nest/
+
+# Claude Code local settings
+.claude/

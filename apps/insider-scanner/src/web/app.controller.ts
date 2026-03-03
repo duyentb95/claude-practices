@@ -252,8 +252,8 @@ var lastHashes  = new Set();
 var lastAddrs   = new Set();
 
 // ─ Pagination + filter state ──────────────────────────────────────────────────
-var PAGE_TRADES   = 20;
-var PAGE_SUSPECTS = 20;
+var PAGE_TRADES   = 10;
+var PAGE_SUSPECTS = 10;
 var tradePage = 0;
 var suspPage  = 0;
 var allTrades   = [];
