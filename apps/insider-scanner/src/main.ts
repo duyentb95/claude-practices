@@ -1,7 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { InsiderScannerModule } from './insider-scanner.module';
 
-const WEB_PORT = parseInt(process.env.WEB_PORT || '3235');
+// Railway injects PORT automatically; fall back to WEB_PORT for local dev
+const WEB_PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3235');
 
 async function bootstrap() {
   const app = await NestFactory.create(InsiderScannerModule, {
