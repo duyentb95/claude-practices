@@ -29,5 +29,15 @@ Thumbs.db
 # Nest / webpack cache
 .nest/
 
-# Claude Code local settings
-.claude/
+# Agent runtime data (raw API dumps, cache — large files, not for git)
+data/raw/
+data/cache/
+data/analysis/
+
+# Agent reports (generated output — not for git)
+reports/daily/
+reports/investigations/
+reports/alerts/
+
+# Claude Code local-only settings (not agents/commands)
+.claude/settings.local.json
