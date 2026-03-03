@@ -9,7 +9,7 @@ WORKDIR /usr/src/app
 COPY package*.json nest-cli.json tsconfig*.json ./
 
 # Install ALL deps (including devDeps needed for nest build / tsc / webpack)
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy source
 COPY apps/ ./apps/
