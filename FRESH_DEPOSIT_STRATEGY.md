@@ -1523,9 +1523,9 @@ Khi strategy này flag 1 address, nên chạy thêm:
 | Web UI filter/search | ✅ Done | `web/app.controller.ts` | Filter coin, address, flag, alertLevel... |
 | Lark webhook alert | ✅ Done | `lark-alert.service.ts` | Card màu theo alertLevel |
 | **Layer 0: Zero address skip** | ✅ Done | `insider-detector.service.ts` | Bỏ `0x000...000` trước aggregation |
-| **Layer 1: MM/HFT filter (Copin API)** | ✅ Done | `insider-detector.service.ts` | `userAddRate <= 0` → skip inspection |
-| `getUserFees()` Copin API | ✅ Done | `hyperliquid-info.service.ts` | POST `https://hyper.copin.io/info` |
-| HFT cache 24h | ✅ Done | `insider-detector.service.ts` | Tránh gọi Copin API lặp lại |
+| **Layer 1: MM/HFT filter (userFees API)** | ✅ Done | `insider-detector.service.ts` | `userAddRate <= 0` → skip inspection |
+| `getUserFees()` native HL API | ✅ Done | `hyperliquid-info.service.ts` | POST `/info` `{"type":"userFees"}` |
+| HFT cache 24h | ✅ Done | `insider-detector.service.ts` | Tránh gọi API lặp lại |
 | InsiderFlag.HFT_PATTERN | ✅ Done | `trade.dto.ts` | Badge `🤖HFT` gray trên web UI |
 
 ### 10.2. Bug Quan Trọng Đã Fix
@@ -1550,7 +1550,7 @@ const gapMs = trade.detectedAt - lastDepositTime;
 
 ### 10.3. Những gì cần làm tiếp (Backlog)
 
-- [ ] Layer 2: REST pre-check fill balance ratio (catch algo traders lọt qua Copin API)
+- [ ] Layer 2: REST pre-check fill balance ratio (catch algo traders lọt qua userFees filter)
 - [ ] Rolling window 60s Layer 2 (detect TWAP split orders)
 - [ ] Hourly volume tracker (scoreC hiện chỉ dùng 24h volume từ API, chưa có realtime hourly)
 - [ ] Dormant wallet bonus (`DORMANT_WALLET_REACTIVATED` flag)
@@ -1580,7 +1580,7 @@ Quan sát từ logs thực tế:
 | Loại | Dấu hiệu | Cách xử lý | Trạng thái |
 |------|----------|-----------|-----------|
 | Zero address | `0x000...000` | Hard-skip trong `bufferTrade()` | ✅ Done |
-| Market Maker / HFT | `userAddRate <= 0` qua Copin API | Skip inspection, flag `HFT` | ✅ Done |
+| Market Maker / HFT | `userAddRate <= 0` qua Hyperliquid `userFees` API | Skip inspection, flag `HFT` | ✅ Done |
 | Algo trader (high fills) | >3000 fills/90d | REST pre-check trong `inspectTrader()` | ⬜ Backlog |
 | Known protocol vaults | Static whitelist (HLP vault...) | Hard-skip | ⬜ Backlog |
 | Whale bình thường (non-fresh) | Nhiều fills, ví lâu năm | Scoring tự lọc (scoreB = 0) | ✅ Auto |
@@ -1597,11 +1597,11 @@ if (!isZero(buyerAddr))  this.accumulateFill(buyerAddr,  'B', raw);
 if (!isZero(sellerAddr)) this.accumulateFill(sellerAddr, 'A', raw);
 ```
 
-### 11.4. Layer 1: Copin API Fee Tier Check ✅
+### 11.4. Layer 1: Hyperliquid `userFees` API Fee Tier Check ✅
 
 **Nguyên tắc:** Hyperliquid chia trader theo fee tier. Market maker ở tier cao nhất được hưởng **maker rebate** — tức `userAddRate` âm (nhận tiền khi post liquidity). Đây là cách chính xác nhất để phân biệt MM.
 
-**API:** `POST https://hyper.copin.io/info` với body `{"type":"userFees","user":"<address>"}`
+**API:** `POST https://api.hyperliquid.xyz/info` với body `{"type":"userFees","user":"<address>"}`
 
 ```json
 // Response mẫu — trader bình thường:
@@ -1616,7 +1616,7 @@ if (!isZero(sellerAddr)) this.accumulateFill(sellerAddr, 'A', raw);
 **Implementation trong `inspectTrader()`:**
 
 ```typescript
-// Layer 1: MM/HFT filter — gọi Copin API TRƯỚC tất cả REST calls khác
+// Layer 1: MM/HFT filter — gọi userFees API TRƯỚC tất cả REST calls khác
 const isHft = await this.checkIsHft(address);
 if (isHft) {
   trade.flags.push(InsiderFlag.HFT_PATTERN);
@@ -1635,7 +1635,7 @@ if (isHft) {
 
 ### 11.5. Layer 2: REST Pre-check (Backlog)
 
-Sau khi lấy fills 90d, check trước khi tính full scoring — catch algo traders không có trong Copin MM tier:
+Sau khi lấy fills 90d, check trước khi tính full scoring — catch algo traders không có trong MM tier:
 
 ```typescript
 // Nếu quá nhiều fills → likely algo trader
@@ -1669,5 +1669,5 @@ if (fills.length > 500) {
 
 - MM không đủ volume để vào rebate tier → `userAddRate > 0` → sẽ bị inspect (ít false negative)
 - Insider dùng ví MM cũ để nguỵ trang → sẽ bị miss (edge case cực hiếm, rủi ro cao cho insider)
-- Copin API timeout/unavailable → `checkIsHft()` trả `false` → an toàn, không miss suspect
+- `userFees` API timeout/unavailable → `checkIsHft()` trả `false` → an toàn, không miss suspect
 - Layer 2 fill balance check tốn 1 REST call/trader nhưng tránh được 2 calls tiếp theo

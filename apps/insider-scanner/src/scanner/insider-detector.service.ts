@@ -424,15 +424,27 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   ): InsiderScore {
     const extraFlags: InsiderFlag[] = [];
 
-    // Parse ledger entries
-    const deposits     = ledger.filter(l => l.delta?.type === 'deposit');
-    const withdrawals  = ledger.filter(l => l.delta?.type === 'withdraw');
-    const ledgerTypes  = new Set<string>(ledger.map(l => l.delta?.type).filter(Boolean));
+    // Parse ledger entries.
+    // Treat incoming 'send' (spot→perp internal transfer from another address) as deposit-equivalent.
+    const targetAddress = (trade.takerAddress ?? '').toLowerCase();
+    const deposits    = ledger.filter(l =>
+      l.delta?.type === 'deposit' ||
+      (l.delta?.type === 'send' && l.delta?.user?.toLowerCase() !== targetAddress),
+    );
+    const withdrawals = ledger.filter(l => l.delta?.type === 'withdraw');
+    const ledgerTypes = new Set<string>(ledger.map(l => l.delta?.type).filter(Boolean));
+
+    // Track whether wallet was funded by an external 'send' (controller/sub-account pattern)
+    const fundedViaSend = deposits.some(d => d.delta?.type === 'send');
 
     const lastDepositTime = deposits.length > 0
       ? Math.max(...deposits.map(d => d.time))
       : 0;
-    const totalDepositsUsd = deposits.reduce((sum, d) => sum + parseFloat(d.delta.usdc || '0'), 0);
+    // 'send' entries use 'usdcValue'/'amount' fields instead of 'usdc'
+    const totalDepositsUsd = deposits.reduce(
+      (sum, d) => sum + parseFloat(d.delta.usdc || d.delta.usdcValue || d.delta.amount || '0'),
+      0,
+    );
 
     const firstActivity = ledger.length > 0
       ? Math.min(...ledger.map(l => l.time))
@@ -479,12 +491,30 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     else if (walletAgeDays < 30) scoreB += 2;
 
     const fillCount = fills.length;
-    if      (fillCount === 0)  scoreB += 10;
-    else if (fillCount <= 3)   scoreB += 8;
-    else if (fillCount <= 10)  scoreB += 5;
-    else if (fillCount <= 30)  scoreB += 2;
+    // 2000 is the Hyperliquid REST hard cap — a wallet at cap is an established high-frequency
+    // trader, the opposite of a fresh insider profile: apply a penalty instead of a bonus.
+    if (fillCount >= 2000) {
+      scoreB -= 5;
+    } else if (fillCount === 0)  scoreB += 10;
+    else if   (fillCount <= 3)   scoreB += 8;
+    else if   (fillCount <= 10)  scoreB += 5;
+    else if   (fillCount <= 30)  scoreB += 2;
 
-    scoreB = Math.min(20, scoreB);
+    // ── Win rate penalty (chronic losers are not acting on information edge) ─
+    const closedFills = fills.filter(f => parseFloat(f.closedPnl ?? '0') !== 0);
+    const winRate = closedFills.length >= 10
+      ? fills.filter(f => parseFloat(f.closedPnl ?? '0') > 0).length / closedFills.length
+      : null; // insufficient data — skip
+
+    if (winRate !== null) {
+      if      (winRate < 0.20) scoreB -= 8;
+      else if (winRate < 0.35) scoreB -= 5;
+      else if (winRate < 0.50) scoreB -= 3;
+      else if (winRate > 0.70) scoreB += 5;
+      else if (winRate > 0.60) scoreB += 3;
+    }
+
+    scoreB = Math.min(20, Math.max(-8, scoreB));
 
     // ── [C] Trade Size vs Market Context (0–20 pts) ──────────────────────────
 
@@ -569,6 +599,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     } else if (deposits.length <= 2 && fillCount <= 3 && walletAgeDays < 7) {
       walletType = WalletType.ONE_SHOT;
       extraFlags.push(InsiderFlag.ONE_SHOT);
+    } else if (fundedViaSend) {
+      // Wallet was funded via internal 'send' from another HL address (controller/sub-account pattern)
+      walletType = WalletType.SUB_ACCOUNT;
     } else if (walletAgeDays < 30 && fillCount < 20) {
       walletType = WalletType.FRESH;
     } else if (accountValue > 1_000_000) {

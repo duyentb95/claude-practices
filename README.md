@@ -17,7 +17,7 @@ Scan real-time trades trên Hyperliquid, phát hiện pattern insider trading:
 - Fresh deposit → immediate large trade
 - Ghost wallets, one-shot wallets
 - Composite scoring engine (0–100)
-- MM/HFT filter via Copin API
+- MM/HFT filter via Hyperliquid `userFees` API
 
 **Web UI**: `http://localhost:3235`
 

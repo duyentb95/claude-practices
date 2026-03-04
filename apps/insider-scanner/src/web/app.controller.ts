@@ -320,6 +320,7 @@ function fmtP(n){
   return '$'+n.toExponential(3);
 }
 function fmtT(ts){ return new Date(ts).toTimeString().slice(0,8) }
+function shortAddr(a){ return a ? '0x'+a.slice(2,5)+'...'+a.slice(-3) : '' }
 function fmtUp(ms){
   var s=Math.floor(ms/1000);
   if(s<60) return s+'s';
@@ -391,8 +392,10 @@ function renderTradeRows(slice){
       ? '<span class="cy f10">'+t.fillCount+'f</span>'
       : '<span class="cd f10">1f</span>';
 
+    var takerUrl = t.takerAddress ? 'https://app.copin.io/trader/'+encodeURIComponent(t.takerAddress)+'/HYPERLIQUID' : '';
     var taker = t.takerAddress
-      ? '<span class="addr cb">'+esc(t.takerAddress)+'</span>'
+      ? '<span class="addr cb" title="'+esc(t.takerAddress)+'">'+esc(shortAddr(t.takerAddress))+'</span>'
+        +' <a href="'+takerUrl+'" target="_blank" rel="noopener" class="copin">↗</a>'
       : '<span class="cd">unknown</span>';
 
     h += '<tr'+cls+'>'
@@ -451,7 +454,7 @@ function renderSuspectRows(slice){
   var h = '<table><thead><tr>'
     + '<th>Wallet</th><th>Score</th><th class="r">Total USD</th><th class="c">Trades</th>'
     + '<th class="r">Acct Value</th><th class="r">90d Fills</th>'
-    + '<th>Coins</th><th>Flags</th><th></th>'
+    + '<th>Coins</th><th>Flags</th>'
     + '</tr></thead><tbody>';
 
   for(var i=0;i<slice.length;i++){
@@ -477,10 +480,11 @@ function renderSuspectRows(slice){
     var coins = (s.coins||[]).slice(0,6).join(', ');
     if((s.coins||[]).length > 6) coins += '…';
 
-    var url = 'https://app.copin.io/trader/'+encodeURIComponent(s.address)+'/hyperliquid';
+    var url = 'https://app.copin.io/trader/'+encodeURIComponent(s.address)+'/HYPERLIQUID';
 
     h += '<tr'+cls+'>'
-      + '<td><span class="addr '+ac+'">'+esc(s.address)+'</span></td>'
+      + '<td><span class="addr '+ac+'" title="'+esc(s.address)+'">'+esc(shortAddr(s.address))+'</span>'
+      + ' <a href="'+url+'" target="_blank" rel="noopener" class="copin">↗</a></td>'
       + '<td>'+alertLevelBadge(lvl, s.insiderScore)+'</td>'
       + '<td class="r"><span class="bold co">'+fmtUsd(s.totalUsd)+'</span></td>'
       + '<td class="c cd">'+s.tradeCount+'</td>'
@@ -488,7 +492,6 @@ function renderSuspectRows(slice){
       + '<td class="r">'+fills+'</td>'
       + '<td class="cd f11">'+esc(coins)+'</td>'
       + '<td>'+flagBadges(s.flags)+'</td>'
-      + '<td><a href="'+url+'" target="_blank" rel="noopener" class="copin">Copin ↗</a></td>'
       + '</tr>';
   }
   return h + '</tbody></table>';

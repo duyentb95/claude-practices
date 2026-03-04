@@ -38,9 +38,9 @@ Both apps registered in `nest-cli.json`.
 Real-time scanner detecting insider trading patterns on Hyperliquid.
 
 - `WsScannerService` — subscribes to Hyperliquid WebSocket `trades` channel for all perp coins; sliding-window aggregation (500ms + 3s cap) to merge partial fills.
-- `InsiderDetectorService` — composite scoring engine (0–100); MM/HFT filter via Copin API; maintains suspects map and large trades rolling window.
+- `InsiderDetectorService` — composite scoring engine (0–100); MM/HFT filter via Hyperliquid `userFees` API; maintains suspects map and large trades rolling window.
 - `RateLimiterService` — sequential queue with 1100ms delay between REST calls.
-- `HyperliquidInfoService` — read-only REST client; POST `/info` for fills, ledger, positions; POST `https://hyper.copin.io/info` for fee tier.
+- `HyperliquidInfoService` — read-only REST client; all calls POST `/info` (fills, ledger, positions, fee tier).
 - `LarkAlertService` — Lark webhook alerts with AlertLevel color coding.
 - `AppController` — `GET /` dashboard HTML; `GET /api/state` JSON state.
 
@@ -60,7 +60,7 @@ Composite score A+B+C+D+E × F (0–100):
 ### MM/HFT Filter
 
 - **Layer 0**: Skip `0x000...000` (zero address) in `bufferTrade()`
-- **Layer 1**: Copin API `userAddRate <= 0` → maker rebate tier → skip inspection, flag `HFT`
+- **Layer 1**: `userFees` API `userAddRate <= 0` → maker rebate tier → skip inspection, flag `HFT`
 - **Cache**: HFT status cached 24h per address
 
 ### Key Enums (`trade.dto.ts`)
@@ -116,10 +116,9 @@ Base: `https://api.hyperliquid.xyz` — All info requests: `POST /info`
 {"type": "userFillsByTime", "user": "0x...", "startTime": ms, "endTime": ms}
 {"type": "clearinghouseState", "user": "0x..."}         // Positions + margin
 {"type": "userNonFundingLedgerUpdates", "user": "0x..."}// Deposits, withdrawals, transfers
+{"type": "userFees", "user": "0x..."}                   // Fee tier: userAddRate ≤ 0 = MM/HFT
 {"type": "l2Book", "coin": "BTC"}                       // Orderbook snapshot
 ```
-
-Copin API: `POST https://hyper.copin.io/info` with `{"type":"userFees","user":"0x..."}` → `{userAddRate, userCrossRate}`
 
 Rate limit: ~1200 req/min. Use 1100ms sequential queue for REST calls.
 

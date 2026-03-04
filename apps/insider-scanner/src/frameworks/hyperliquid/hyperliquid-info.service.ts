@@ -53,12 +53,16 @@ export interface LedgerUpdateDto {
   time: number;
   hash: string;
   delta: {
-    type: string;         // 'deposit' | 'withdraw' | 'internalTransfer' | 'subAccountTransfer' | 'rewardsClaim' | ...
-    usdc?: string;        // amount as string
+    type: string;         // 'deposit' | 'withdraw' | 'send' | 'internalTransfer' | 'subAccountTransfer' | 'rewardsClaim' | ...
+    usdc?: string;        // amount for 'deposit' type
+    amount?: string;      // amount for 'send' type
+    usdcValue?: string;   // USD value for 'send' type
+    token?: string;       // token symbol for 'send' type (e.g. 'USDC')
+    user?: string;        // sender address for 'send' type
     nonce?: number;
     fee?: number;
     toPerp?: boolean;
-    destination?: string; // for transfers
+    destination?: string; // recipient address for transfers
   };
 }
 
@@ -139,36 +143,11 @@ export class HyperliquidInfoService {
   }
 
   /**
-   * Fetch user fee tier from Copin API.
+   * Fetch user fee tier from Hyperliquid native API.
    * userAddRate <= 0 → trader is in a maker-rebate tier (market maker / HFT).
-   * Uses a different base URL: https://hyper.copin.io/info
    */
   async getUserFees(address: string): Promise<UserFeesDto | null> {
-    const COPIN_URL = 'https://hyper.copin.io/info';
-    const response = await AsyncUtil.wrapPromise(
-      lastValueFrom(
-        this.httpService
-          .post(
-            COPIN_URL,
-            { type: 'userFees', user: address },
-            {
-              timeout: this.DEFAULT_TIMEOUT,
-              headers: { 'content-type': 'application/json', origin: 'https://app.copin.io' },
-            },
-          )
-          .pipe(
-            catchError((e) => {
-              this.logger.warn(`Copin userFees error [${address.slice(0, 10)}]: ${e.message}`);
-              return of(null);
-            }),
-          ),
-      ),
-      this.DEFAULT_TIMEOUT + 2000,
-      null,
-    );
-
-    if (!response || response.status < 200 || response.status >= 300) return null;
-    return response.data ?? null;
+    return this.postInfo<UserFeesDto | null>({ type: 'userFees', user: address }, null);
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────────
