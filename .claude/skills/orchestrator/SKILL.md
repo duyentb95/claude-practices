@@ -1,217 +1,201 @@
 ---
 name: hl-orchestrator
+version: 2.0.0
 description: >
-  Master orchestrator for Hyperliquid quant trading skill system. Routes tasks to specialized skills,
-  manages multi-skill workflows, and creates agent teams when parallel work is needed.
-  Triggers: any Hyperliquid trading task that spans multiple skills, complex investigation,
-  full analysis pipeline, multi-step workflow, team analyze, comprehensive report.
-  This skill should be invoked when the task doesn't clearly map to a single specialized skill.
-version: 1.0.0
-author: quant-trading-team
+  Master orchestrator for the Hyperliquid insider-scanner skill system.
+  Trigger when a task requires multiple specialized agents or skills working together,
+  or when scope is too large for a single skill session.
+  Keywords: analyze, investigate team, run pipeline, daily pipeline, multi-step,
+  orchestrate, coordinate agents, full analysis, system-wide.
+complexity: 16/20
 architecture: Composable
-complexity: 18
-platforms: [claude-code, cursor, windsurf]
-tags: [orchestrator, multi-agent, workflow, hyperliquid, quant-trading]
+platforms: [claude-code]
+updated: 2026-03-05
 ---
-
-# Hyperliquid Orchestrator
 
 ## Goal
 
-Route incoming tasks to the correct specialized skill (or combination of skills).
-Create agent teams for parallel work. Manage multi-step workflows that span
-insider detection, trade reconciliation, backtesting, and analytics.
+Route tasks to the correct specialized skill or agent team. Coordinate parallel work,
+manage file ownership, synthesize cross-skill outputs into actionable insights.
+
+## Core Capabilities
+
+- **Task routing** — match user requests to the right skill or command
+- **Agent team creation** — spawn parallel subagents with clear file ownership
+- **Daily pipeline** — orchestrate the full data-fetcher → scorer → clusterer → writer flow
+- **Output synthesis** — merge results from multiple agents into a single coherent report
+- **Error resilience** — if one agent fails, continue with others; flag missing data in report
+
+---
 
 ## Instructions
 
-### Step 1: Task Classification
+### Phase 1 — Classify the Request
 
-Analyze the user's request and classify into one or more skill domains:
+Determine the task type and route accordingly:
 
-```
-Task → Classification → Routing Decision
+| User says... | Route to | Mode |
+|-------------|----------|------|
+| "scan BTC" / "investigate 0x..." | `/investigate` or `/scan-token` | Single skill |
+| "run daily report" / "daily pipeline" | `/daily-report` | Agent Team (3 agents) |
+| "analyze this token that just listed" | `/scan-token {TOKEN}` | Agent Team (4 agents) |
+| "optimize the strategy" | `/optimize-strategy` | Sequential pipeline |
+| "deploy" | `/deploy` | Sequential pipeline |
+| Complex custom request | Build custom Agent Team | See Phase 3 |
 
-"Scan token HYPE for insider trading"
-  → Domain: insider-detection
-  → Route: insider-detector skill (single)
+**Fast-path rules:**
+- Single wallet → `/investigate {address}` (sequential subagents, no team needed)
+- Single coin + straightforward → `/scan-token {coin}` (team of 3)
+- Multi-coin, multi-day, strategic → custom team
 
-"Reconcile this week's trades"
-  → Domain: trading-ops
-  → Route: trade-reconciler skill (single)
+---
 
-"Backtest momentum strategy on ETH"
-  → Domain: alpha-research
-  → Route: alpha-backtester skill (single)
+### Phase 2 — Standard Pipelines
 
-"What's the funding rate on BTC?"
-  → Domain: analytics
-  → Route: perp-analytics skill (single)
-
-"Full investigation: scan HYPE for insiders, check if our bot's fills match,
- and see if a funding arb strategy would have worked"
-  → Domain: multi (insider + recon + backtest)
-  → Route: Agent Team (parallel)
-```
-
-### Step 2: Routing Rules
-
-**Single-skill routing** (use subagent via Task):
-
-| Pattern | Skill | Model |
-|---------|-------|-------|
-| Insider, suspicious, front-running, scan token, investigate wallet | `insider-detector` | opus |
-| Reconcile, recon, P&L check, fill verify, fee audit | `trade-reconciler` | sonnet |
-| Backtest, strategy test, Sharpe, walk-forward, alpha signal | `alpha-backtester` | opus |
-| Dashboard, market overview, funding, whale, liquidation, event | `perp-analytics` | sonnet |
-
-**Multi-skill routing** (create Agent Team):
-
-When the task requires 2+ skills AND the sub-tasks can run in parallel:
+#### Daily Pipeline (`/daily-report`)
 
 ```
-Create Agent Team "hl-{short_desc}-{YYMMDD}" with:
+Parallel Agent Team:
+  ┌─ data-fetcher        → data/raw/{YYYY-MM-DD}/
+  └─ [waits for fetcher] ─┬─ pattern-scorer   → data/analysis/scores/daily-{YYYYMMDD}.json
+                           └─ wallet-clusterer → data/analysis/clusters/daily-{YYYYMMDD}.json
 
-For each skill needed, spawn a teammate:
-  - insider-detector tasks → Teammate with opus model
-  - trade-reconciler tasks → Teammate with sonnet model
-  - alpha-backtester tasks → Teammate with opus model
-  - perp-analytics tasks → Teammate with sonnet model
-
-Assign file ownership per skill's Constraints section.
-Set task dependencies based on data flow.
+Sequential after both complete:
+  report-writer → reports/daily/{YYYYMMDD}.md
+  strategy-optimizer → data/proposals/strategy-{YYYYMMDD}-{title}.md  [if issues found]
 ```
 
-### Step 3: Data Flow Management
+**Agent assignments:**
 
-Skills share data through the filesystem:
+| Agent | Model | Output directory | Max turns |
+|-------|-------|-----------------|-----------|
+| `data-fetcher` | sonnet | `data/raw/` | 40 |
+| `pattern-scorer` | opus | `data/analysis/scores/` | 40 |
+| `wallet-clusterer` | opus | `data/analysis/clusters/` | 35 |
+| `report-writer` | sonnet | `reports/` | 20 |
+| `strategy-optimizer` | opus | `data/proposals/` | 40 |
+| `code-dev` | opus | `apps/` | 50 |
+
+#### Token Investigation (`/scan-token {TOKEN}`)
 
 ```
-insider-detector → writes → data/analysis/scores/
-                          → reports/investigations/
-                          → reports/alerts/
+Agent Team (parallel):
+  ├─ data-fetcher: fetch 14-day window, top 30 early wallets for {TOKEN}
+  ├─ wallet-clusterer: cluster wallets by timing/size/direction correlation
+  └─ pattern-scorer: score each wallet using composite model
 
-trade-reconciler → writes → data/analysis/recon/
-                          → reports/recon/
-
-alpha-backtester → writes → data/analysis/backtest/
-                          → reports/backtest/
-                          → scripts/backtest_*.py
-
-perp-analytics   → writes → reports/analytics/
-                          → scripts/dashboard_*.py
-
-All skills read from:
-  data/raw/          (raw API data)
-  data/cache/        (cached responses)
-  apps/              (existing codebase — read only)
+After all complete:
+  report-writer: generates investigation report + alert (if score ≥ HIGH)
 ```
 
-### Step 4: Synthesis
+#### Single Wallet (`/investigate {address}`)
 
-After all skills complete:
-1. Read outputs from each skill
-2. Synthesize findings into a unified summary
-3. Highlight cross-domain insights (e.g., "insider wallet 0xABC also appears in reconciliation mismatch")
-4. Generate executive summary if multiple reports were produced
-
-### Common Workflows
-
-**Workflow 1: New Token Due Diligence**
 ```
-User: "Full analysis on newly listed token X"
-
-1. perp-analytics → Token Deep-Dive (market data, OI, funding)
-2. insider-detector → Scan for insider activity around listing
-3. alpha-backtester → Quick test: would funding arb work?
-4. Synthesize: "Token X — Market stats, insider risk assessment, trading opportunities"
+Sequential subagents:
+  1. data-fetcher   → collect ledger, fills (10k), state for address
+  2. wallet-clusterer → find related addresses via send graph
+  3. pattern-scorer → compute composite score
+  4. report-writer  → generate investigation report
 ```
 
-**Workflow 2: Daily Operations**
-```
-User: "Morning briefing"
+#### Strategy Optimization (`/optimize-strategy`)
 
-1. perp-analytics → Market Snapshot (overview, top funding, notable events)
-2. insider-detector → Daily Scan (new listings, flagged wallets)
-3. trade-reconciler → Check last 24h fills for reconciliation issues
-4. perp-analytics → System Monitor (all apps health check)
-5. Synthesize: "Daily Briefing — Market, Insiders, Recon, Systems"
 ```
-
-**Workflow 3: Post-Event Analysis**
-```
-User: "BTC crashed 10%, analyze everything"
-
-1. perp-analytics → Event Analyzer (timeline, impact, whale trades)
-2. trade-reconciler → Check fills during crash (latency, missed fills)
-3. insider-detector → Scan for front-running before crash
-4. alpha-backtester → "If we had X strategy, how would we have performed?"
-5. Synthesize: "Crash Post-Mortem — Timeline, Impact, Insiders, Lessons"
+Sequential pipeline:
+  1. strategy-optimizer → analyze current false positive/negative patterns
+                        → produce proposal in data/proposals/
+  2. [user review of proposal]
+  3. code-dev          → implement approved changes
+  4. [build + test]
+  5. /deploy           → Railway deploy + verify
 ```
 
-## Examples
+---
 
-### Example 1: Multi-Skill Task
+### Phase 3 — Custom Agent Team Construction
 
-**Input:**
+When none of the standard pipelines fit, build a custom team:
+
 ```
-/team-analyze Full due diligence on HYPE token: insider check, market analysis, and backtest a simple momentum strategy
-```
-
-**Expected Behavior:**
-
-Orchestrator creates Agent Team:
-```
-Team: hl-hype-dd-260305
-
-Teammate 1 (perp-analytics, sonnet):
-  "Run Token Deep-Dive for HYPE: price, volume, OI, funding, liquidity, top holders.
-   Save to reports/analytics/HYPE_260305.md"
-
-Teammate 2 (insider-detector, opus):
-  "Scan HYPE for insider trading: all fills in 14-day window around listing,
-   top wallets, clustering, scoring. Save to reports/investigations/HYPE_260305.md"
-
-Teammate 3 (alpha-backtester, opus):
-  "Backtest momentum strategy on HYPE: long if 24h return > 5% and volume > 2x avg,
-   SL 3%, TP 10%, $5k position, last 60 days.
-   Save to reports/backtest/hype-momentum_260305.md"
-
-Dependencies: None — all three can run in parallel.
-Synthesis: After all complete, summarize key findings across all reports.
+Rules:
+  1. Max 4 agents in parallel (token budget)
+  2. Assign each agent a unique output directory — no overlap
+  3. Sequential agents must explicitly wait for predecessors to complete
+  4. Include synthesis step at the end
 ```
 
-**Expected Output (synthesis):**
-```markdown
-# HYPE Token Due Diligence — 2026-03-05
-
-## Market Analysis (perp-analytics)
-- Current price: $14.20, 24h volume: $45M, OI: $120M
-- Funding: +0.015% per 8h (annualized 20%) — shorts paying longs
-- Liquidity: 2% depth = $2.1M, spread 0.02%
-
-## Insider Risk (insider-detector)
-- 4 wallets flagged (2 high-confidence, 2 likely)
-- Highest score: 91 — pre-listing accumulation pattern
-- See full report: reports/investigations/HYPE_260305.md
-
-## Strategy Test (alpha-backtester)
-- Momentum strategy: +12.3% over 60 days, Sharpe 1.21
-- Warning: overfit ratio 1.4 — moderate risk
-- See full report: reports/backtest/hype-momentum_260305.md
-
-## Recommendation
-HYPE shows strong trading activity but elevated insider risk.
-Momentum strategy viable but requires careful position sizing
-given the insider activity and high leverage in the market.
+**Team template:**
 ```
+Teammate 1 — {agent-name}:
+  Task: {specific task description}
+  Output: {directory/filename pattern}
+  Depends on: [none | teammate N]
+
+Teammate 2 — {agent-name}:
+  Task: {specific task description}
+  Output: {directory/filename pattern}
+  Depends on: [none | teammate N]
+
+Synthesis (orchestrator):
+  Read outputs from all teammates.
+  Generate unified report at: reports/{type}/{YYYYMMDD}-{title}.md
+  Highlight cross-agent insights (not just concatenation).
+```
+
+---
+
+### Phase 4 — Output Synthesis
+
+After all agents complete, the orchestrator synthesizes:
+
+1. **Cross-domain findings**: patterns that only become visible when combining scorer + clusterer output
+2. **Confidence calibration**: single wallet score vs corroborated cluster score
+3. **Priority ranking**: sort suspects by (clusterSize × maxScore) not just individual score
+4. **Action recommendations**: concrete next steps based on alert levels
+
+Example synthesis insight (not available from single agent):
+> "Wallet `0xabc…` scored 72 alone (HIGH), but it is part of cluster C001 where
+> master controller `0xdef…` funded 6 wallets totalling $1.25M — collective score
+> elevates to CRITICAL. Recommend alerting on the cluster, not individual wallets."
+
+---
+
+### Phase 5 — Error Handling
+
+| Failure | Action |
+|---------|--------|
+| data-fetcher returns empty | Continue with note: "insufficient data for {address}" |
+| pattern-scorer fails on 1 wallet | Skip that wallet; flag in report |
+| API rate limit (429) | data-fetcher handles retry internally; orchestrator does not retry |
+| wallet-clusterer times out | Use pattern-scorer output alone; note cluster data unavailable |
+| All agents succeed but no suspects found | Generate "clean scan" report — this is valid output |
+
+---
+
+## File Ownership Map
+
+```
+data/raw/{YYYY-MM-DD}/       → data-fetcher ONLY
+data/raw/wallets/{addr}/     → data-fetcher ONLY
+data/raw/tokens/{TOKEN}/     → data-fetcher ONLY
+data/analysis/scores/        → pattern-scorer ONLY
+data/analysis/clusters/      → wallet-clusterer ONLY
+data/proposals/              → strategy-optimizer ONLY
+reports/daily/               → report-writer ONLY
+reports/investigations/      → report-writer ONLY
+reports/alerts/              → report-writer ONLY
+apps/                        → code-dev ONLY
+```
+
+**NEVER** allow two agents to write to the same directory in the same session.
+
+---
 
 ## Constraints
 
-- **Routing accuracy**: Always route to the most specific skill. Don't use orchestrator for tasks that clearly belong to one skill.
-- **Agent Teams sparingly**: Only create teams when 2+ skills are needed AND sub-tasks are parallelizable. For sequential tasks, run skills one at a time via subagent Task().
-- **File conflicts**: NEVER let two teammates write to the same directory. Each skill has its own output directories.
-- **Token budget**: Agent Teams cost ~5x a single session. Warn user before spawning teams for simple tasks.
-- **Synthesis required**: When running multi-skill workflows, ALWAYS produce a synthesis summary that connects findings across skills.
-- **Error handling**: If one skill fails, continue with others and note the failure in synthesis.
-- **Existing apps**: Reference `apps/insider-scanner/`, `apps/data-analytics/`, `apps/hyper-rau/` for integration context.
-- **Read-only**: Orchestrator never modifies source code. Skills that need code changes should use the code-dev agent instead.
+1. **Token budget**: Agent Teams cost 5× single session. Use teams only when parallelism is necessary.
+2. **Model selection**: data-fetcher and report-writer → `sonnet` (fast, sufficient). Analysts → `opus`.
+3. **File ownership**: strictly enforced — each agent owns its output directory.
+4. **Synthesis is mandatory**: orchestrator must always produce a synthesis, not just concatenate agent outputs.
+5. **Do not re-run completed agents**: check if output files already exist before spawning.
+6. **Time scope**: default analysis window is last 7 days unless user specifies otherwise.

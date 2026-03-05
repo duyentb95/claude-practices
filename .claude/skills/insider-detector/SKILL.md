@@ -1,202 +1,277 @@
 ---
 name: insider-detector
+version: 2.1.0
 description: >
-  Use this skill PROACTIVELY when analyzing Hyperliquid perp DEX trades for insider trading patterns.
-  Triggers: insider, suspicious wallet, pre-listing, front-running, wash trading, ghost wallet,
-  one-shot wallet, coordinated trading, abnormal volume, fresh deposit attack, whale tracking,
-  Hyperliquid investigation, on-chain forensics.
-version: 1.0.0
-author: quant-trading-team
+  Detect insider trading patterns on Hyperliquid perpetuals.
+  Trigger when asked to investigate a wallet, token, or suspicious large trade.
+  Keywords: insider, suspicious trade, fresh deposit, whale, investigate wallet,
+  scan token, coordinated wallets, suspicious activity, front-running.
+complexity: 18/20
 architecture: Pipeline
-complexity: 16
-platforms: [claude-code, cursor, windsurf]
-tags: [insider-trading, hyperliquid, perp-dex, on-chain-forensics, pattern-detection]
+platforms: [claude-code]
+updated: 2026-03-05
 ---
-
-# Insider Detector
 
 ## Goal
 
-Detect insider trading patterns on Hyperliquid perpetual DEX by analyzing wallet behavior,
-trade timing relative to announcements/listings, volume anomalies, and coordinated wallet clusters.
-Output ranked suspicious wallets with evidence chains and confidence scores (0–100).
+Investigate wallets and trades on Hyperliquid DEX for insider trading signals.
+Produce a composite insider-probability score (0–100) with supporting evidence,
+classify alert level, and generate a structured Markdown report.
+
+## Core Capabilities
+
+- **Composite scoring** — A+B+C+D+E × F model (0–100) tuned to Hyperliquid data
+- **MM/HFT filter** — skips market makers via native `userFees` API (maker-rebate tier)
+- **Send-type detection** — catches sub-account/controller funding via internal `send` entries
+- **Paginated fills** — up to 10 000 most recent aggregated orders per wallet
+- **All-time PnL signal** — profitable wallets score higher (informed trader indicator)
+- **Wallet clustering** — delegates to `wallet-clusterer` agent for correlated wallets
+
+---
 
 ## Instructions
 
-### Phase 1: Data Acquisition
+### Phase 1 — Clarify Scope
 
-1. Identify the **investigation scope** from user request:
-   - Token-based: "scan token HYPE" → fetch all fills for that token
-   - Wallet-based: "investigate 0xABC" → fetch all activity for that wallet
-   - Event-based: "scan around HYPE listing" → fetch 48h window around event
-   - Daily scan: "daily report" → fetch new listings + top volume wallets
+Before fetching data, determine:
+1. **Target**: wallet address, coin symbol, or "all recent large trades"
+2. **Mode**: quick (single wallet) or full investigation (token + top wallets)
+3. **Time window**: default last 7 days; extend to 30 if suspect appears long-running
 
-2. Fetch data from Hyperliquid API (`POST https://api.hyperliquid.xyz/info`):
-   ```
-   Token metadata:    {"type": "metaAndAssetCtxs"}
-   Wallet fills:      {"type": "userFills", "user": "0x..."}
-   Positions:         {"type": "clearinghouseState", "user": "0x..."}
-   Open orders:       {"type": "openOrders", "user": "0x..."}
-   Funding history:   {"type": "userFunding", "user": "0x...", "startTime": ms, "endTime": ms}
-   ```
+If target is a token name, resolve to coin symbol first (e.g. "Bitcoin" → "BTC").
 
-3. Rate limiting: 50ms delay between requests. Exponential backoff on 429.
-   Cache responses in `data/cache/` with 1-hour TTL.
+---
 
-4. Save raw data to `data/raw/{scope_type}/{identifier}/` with metadata wrapper:
-   ```json
-   {"fetched_at": "ISO8601", "source": "hyperliquid_api", "query": {...}, "record_count": N, "data": [...]}
-   ```
+### Phase 2 — Data Acquisition
 
-### Phase 2: Pattern Detection
+All calls: `POST https://api.hyperliquid.xyz/info`
+Rate limit: **1 100 ms between calls**. Use the `data-fetcher` agent for bulk collection.
 
-Run these 6 detectors in parallel. Each outputs a factor score (0–100):
+**Inspection order for each wallet:**
 
-**Detector 1: Pre-Event Accumulation (weight 0.30)**
-- Find large positions opened 1–48h before known events (listings, airdrops, parameter changes)
-- Score = min(100, position_size_usd / 1000) × timing_bonus
-- Timing bonus: <4h = ×1.5, <12h = ×1.2, <48h = ×1.0
-- Threshold: position > $10,000 USD
-
-**Detector 2: Volume Anomaly (weight 0.20)**
-- Compare pre-event 24h volume vs 7-day daily average
-- Score = min(100, (volume_ratio - 1) × 33)
-- No prior activity + volume > $5k → score = 90 (fresh wallet signal)
-
-**Detector 3: Win Rate on New Listings (weight 0.15)**
-- Calculate PnL per trade on tokens listed within 30 days
-- Score = min(100, max(0, (win_rate - 0.5) × 200))
-- Minimum 3 trades required, else score = 0
-
-**Detector 4: Timing Precision (weight 0.15)**
-- Measure time between order placement and 5% price move in trade direction
-- <5min = 100, <30min = 70, <2h = 40, else = 0
-- Average across all profitable trades
-
-**Detector 5: Wallet Clustering (weight 0.10)**
-- Group wallets by: timing correlation (<60s), size mirroring (±5%), directional alignment
-- Cluster confidence = timing×0.35 + size×0.25 + direction×0.25 + behavior×0.15
-- Score = cluster_confidence × 100. Bonus +20 if cluster > 3 wallets
-
-**Detector 6: One-Shot Behavior (weight 0.10)**
-- Fresh wallet (<7 days) + few trades (<5) + single large trade (>$10k) = score 90
-- Few trades (<10) + few tokens (<3) = score 50
-- Else = 0
-
-### Phase 3: Scoring & Ranking
-
-1. Composite score = Σ(factor_score × weight) for each wallet
-2. Classify verdict:
-   - ≥80: `high_confidence_insider` 🔴
-   - 60–79: `likely_insider` 🟡
-   - 40–59: `suspicious` 🟢
-   - <40: `low_risk` (omit from report)
-3. Build evidence chain for each flagged wallet: chronological list of events with timestamps, amounts, and context
-
-### Phase 4: Report Generation
-
-Output structured JSON to `data/analysis/scores/{scope}.json` AND
-Markdown report to `reports/{type}/{scope}_{YYMMDD}.md`.
-
-Report must include:
-- Executive summary (2-3 sentences)
-- Ranked findings with evidence tables
-- Wallet clusters visualization (text-based)
-- Statistical summary table
-- Methodology section
-- Raw data references
-
-## Examples
-
-### Example 1: Token Investigation
-
-**Input:**
 ```
-/scan-token PURR
+1. userFees                        → Layer 1: skip if userAddRate ≤ 0 (HFT/MM)
+2. userNonFundingLedgerUpdates     → deposit / send / withdraw history
+3. userFillsByTime (paginated)     → up to 10k orders, aggregateByTime: true
+   └─ page = 2000 records, pause 300ms between pages, endTime = min(page.time)−1
+4. clearinghouseState              → margin summary + open positions
+5. metaAndAssetCtxs                → coin 24h volume + OI for scoreC context
 ```
 
-**Expected Behavior:**
-1. Fetch metaAndAssetCtxs → find PURR listing date
-2. Fetch all userFills for PURR in 14-day window around listing
-3. Identify top 30 wallets by volume
-4. For each: fetch full history, run 6 detectors
-5. Cluster analysis on top wallets
-6. Score and rank
-7. Generate report
+**Ledger field mapping by entry type:**
 
-**Expected Output (summary):**
+| type | amount field | sender field |
+|------|-------------|--------------|
+| `deposit` | `usdc` | — |
+| `send` (incoming) | `usdcValue` or `amount` | `user` (sender address) |
+| `withdraw` | `usdc` | — |
+
+Treat `send` where `delta.user ≠ target_address` as deposit-equivalent.
+This catches the **controller/sub-account funding pattern** (wallets funded by a master controller without on-chain deposit).
+
+---
+
+### Phase 3 — Composite Scoring (A+B+C+D+E × F)
+
+#### [A] Deposit-to-Trade Speed — 0–25 pts
+
 ```
-## Token Investigation: PURR — 2026-03-05
+lastFundingTime = max(deposit.time, incoming_send.time)
+gapMs  = trade.detectedAt − lastFundingTime
+gapMin = gapMs / 60_000
 
-Scanned 847 wallets trading PURR around listing (2026-02-20).
-Flagged 4 wallets:
-  🔴 0x1a2b...3c4d — Score 91 — $180k pre-listing long, 3h before announcement
-  🔴 0x5e6f...7a8b — Score 84 — Cluster with above, correlated timing
-  🟡 0x9c0d...1e2f — Score 67 — 5/6 win rate on new listings, one-shot pattern
-  🟡 0x3a4b...5c6d — Score 62 — Volume 4.8x above 7-day average pre-event
-Total suspicious volume: $423,000
-Estimated insider PnL: $67,200
-```
+≤ 5 min  → 25   + flag FRESH_DEPOSIT
+≤ 15 min → 22
+≤ 30 min → 18
+≤ 60 min → 14
+≤ 3 h    → 10
+≤ 6 h    →  6
+≤ 24 h   →  3
+> 24 h   →  0
 
-### Example 2: Wallet Deep-Dive
-
-**Input:**
-```
-/investigate 0x1234567890abcdef1234567890abcdef12345678
-```
-
-**Expected Behavior:**
-1. Fetch full wallet history: fills, positions, funding, orders
-2. Find all tokens traded → identify new listings traded
-3. Compute win rate, timing precision, volume patterns
-4. Find related wallets (cluster analysis)
-5. For each related wallet, repeat data fetch + scoring
-6. Generate investigation report with evidence chain
-
-**Expected Output (evidence chain):**
-```
-Evidence Chain — 0x1234...5678 (Score: 87)
-
-2026-03-01 11:15 UTC+7 — Received $100,000 USDC deposit (first activity on this wallet)
-2026-03-01 11:22 UTC+7 — Opened $85,000 HYPE long at $12.40 (25x leverage)
-2026-03-01 14:00 UTC+7 — Hyperliquid announces HYPE listing on Twitter
-2026-03-01 14:05 UTC+7 — HYPE price moves to $15.80 (+27.4%)
-2026-03-01 14:10 UTC+7 — Closed position — realized PnL: +$23,100
-2026-03-01 14:30 UTC+7 — Full withdrawal to 0x5e6f...7a8b (same cluster C001)
-2026-03-01 15:00 UTC+7 — 0x5e6f...7a8b withdraws to Binance deposit address
+Bonus: if trade.usdSize / totalFundingUsd > 0.80 → +3 (nearly all deposit used)
 ```
 
-### Example 3: Daily Scan
+#### [B] Wallet Freshness & Quality — floor −8, cap 20 pts
 
-**Input:**
 ```
-/daily-report
+# Wallet age (from first ledger entry)
+< 1 day  → +10
+< 3 days → +8
+< 7 days → +6
+< 14 days → +4
+< 30 days → +2
+
+# 90-day order count (fills90d.length, aggregateByTime=true)
+≥ 2000 → −5   (hard-cap API returns 2000: established HF trader)
+= 0    → +10
+≤ 3    → +8
+≤ 10   → +5
+≤ 30   → +2
+
+# Win rate (90d closed fills, require ≥10 closed positions)
+< 20% → −8   | < 35% → −5   | < 50% → −3
+> 60% → +3   | > 70% → +5
+
+# All-time PnL (sum closedPnl across all paginated fills)
+> $10 000  → +4   | > $0     → +2
+< $0       → −3   | < −$10 000 → −5
+
+scoreB = clamp(scoreB, min=−8, max=20)
 ```
 
-**Expected Output:**
+#### [C] Trade Size vs Market — 0–20 pts
+
 ```
-## Daily Insider Scan — 2026-03-05
+dayNtlVlm = coin.dayNtlVlm from metaAndAssetCtxs (24h volume USD)
+oiUsd     = coin.openInterest × coin.markPx
 
-Tokens scanned: 142
-New listings (48h): PURR, MOG, WIF
-Wallets flagged: 7 (2 high, 3 likely, 2 suspicious)
+if dayNtlVlm < 100_000 AND trade.usdSize > 10_000:
+  → +12 + flag DEAD_MARKET
+else:
+  vlmRatio = trade.usdSize / dayNtlVlm
+  > 10% → +10  | > 5% → +7  | > 1% → +4
 
-🔴 HIGH PRIORITY:
-  0x1a2b...3c4d — Score 91 — PURR pre-listing accumulation
-  0x5e6f...7a8b — Score 84 — Cluster member, correlated with above
+oiRatio = trade.usdSize / oiUsd
+> 10% → +8 + flag HIGH_OI_RATIO  | > 5% → +6  | > 1% → +3
 
-Full report: reports/daily/260305.md
+scoreC = min(20, scoreC)
 ```
+
+#### [D] Position Concentration — 0–15 pts
+
+```
+marginUtil = totalMarginUsed / accountValue
+impliedLev = trade.usdSize / accountValue
+
+marginUtil > 90% → +8 + flag ALL_IN
+marginUtil > 70% → +5
+marginUtil > 50% → +3
+
+impliedLev ≥ 20× → +3 + flag HIGH_LEVERAGE
+
+marginUsed / totalFundingUsd > 90% → +4   (all deposited capital deployed)
+
+scoreD = min(15, scoreD)
+```
+
+#### [E] Ledger Purity — 0–10 pts
+
+```
+isDepositOnly = (withdrawals.length = 0 AND deposits.length > 0)
+
+isDepositOnly              → +5 + flag DEPOSIT_ONLY
+ledgerTypes = {'deposit'}  → +3   (no sends, rewards, etc.)
+no rewardsClaim + age <30d → +2
+
+scoreE = min(10, scoreE)
+```
+
+#### [F] Behavioral Multiplier — ×1.0–1.5
+
+```
+hasImmediate   = scoreA ≥ 22   (funded < 15 min before trade)
+hasFreshWallet = fills90d = 0 OR walletAge < 1 day
+hasAllIn       = flag ALL_IN in extraFlags
+hasDeadMarket  = flag DEAD_MARKET in extraFlags
+
+hasImmediate + hasFreshWallet             → +0.20
+hasImmediate + hasAllIn                   → +0.15
+hasFreshWallet + hasDeadMarket            → +0.15
+hasImmediate + hasFreshWallet + hasAllIn  → +0.10  (triple combo)
+
+multiplier = min(1.5, 1.0 + bonuses)
+finalScore = min(100, round((A+B+C+D+E) × multiplier))
+```
+
+---
+
+### Phase 4 — Classify & Record
+
+**Alert level:**
+
+| Score | Level | Badge | Action |
+|------:|-------|-------|--------|
+| ≥ 75 | `CRITICAL` | 🔴 | Lark alert + full report |
+| ≥ 55 | `HIGH` | 🟠 | Lark alert + report |
+| ≥ 40 | `MEDIUM` | 🟡 | Log + report |
+| ≥ 25 | `LOW` | 🔵 | Log only |
+| < 25 | `NONE` | — | **Discard — do not record** |
+
+**Wallet type** (evaluated in order, first match wins):
+
+| Type | Criteria |
+|------|----------|
+| `GHOST` | `isDepositOnly` AND `fills90d ≤ 5` AND `walletAge < 14d` |
+| `ONE_SHOT` | `deposits ≤ 2` AND `fills90d ≤ 3` AND `walletAge < 7d` |
+| `SUB_ACCOUNT` | funded via incoming `send` from another HL address |
+| `FRESH` | `walletAge < 30d` AND `fills90d < 20` |
+| `WHALE` | `accountValue > $1 000 000` |
+| `NORMAL` | default |
+
+**Flag bonuses** (used for suspect sorting, not score):
+`GHOST +15` · `ONE_SHOT +12` · `FRESH_DEP +10` · `FIRST +8` · `ALL_IN +6` · `MEGA +5` · `NEW_ACCT +4`
+
+---
+
+### Phase 5 — Generate Report
+
+```markdown
+## 🔍 Investigation: {COIN} — {YYYY-MM-DD HH:MM UTC+7}
+
+### Executive Summary
+**Score: XX/100 — LEVEL 🔴**
+Wallet `0xXXX…XXX` (TYPE) traded {COIN} {SIDE} ${X.XM} approximately {X} minutes
+after depositing ${X.XM}. [One-sentence verdict.]
+
+### Score Breakdown
+| Component | Score | Key Signal |
+|-----------|------:|------------|
+| A. Deposit Speed | XX/25 | {X} min gap |
+| B. Freshness & Quality | XX/20 | {X}d old · {X} 90d orders · PnL ${X} |
+| C. Market Ratio | XX/20 | {X}% of 24h vol · {X}% OI |
+| D. Position Concentration | XX/15 | {X}% margin utilization |
+| E. Ledger Purity | XX/10 | {deposit-only/has withdrawals} |
+| **Multiplier** | ×X.X | {combo description} |
+| **Final Score** | **XX/100** | **{LEVEL}** |
+
+### Evidence Timeline (UTC+7)
+| Time | Event | Amount | Notes |
+|------|-------|--------|-------|
+| HH:MM | Deposit | +$X,XXX | via {deposit/send from 0xABC…} |
+| HH:MM | Trade detected | {COIN} {BUY/SELL} $X.XM | {X} fills aggregated |
+
+### Wallet Profile
+| Field | Value |
+|-------|-------|
+| Address | `0xXXX…XXX` · [Copin ↗](https://app.copin.io/trader/0x.../HYPERLIQUID) |
+| Type | {WalletType} |
+| Age | {X} days |
+| Account Value | ${X} |
+| 90d Orders | {X} |
+| All-time PnL | ${X} |
+| Flags | `{FLAG1}` `{FLAG2}` |
+
+### Related Wallets
+{Cluster analysis from wallet-clusterer, or "None identified"}
+
+### Verdict
+{CRITICAL/HIGH: Recommend monitoring. Likely pre-positioned on {information source}.}
+{MEDIUM: Suspicious but insufficient evidence. Continue monitoring.}
+{LOW: Unlikely insider. Normal trader profile.}
+```
+
+---
 
 ## Constraints
 
-- **Rate limit**: Max 1200 req/min to Hyperliquid API. Always implement 50ms delay.
-- **File ownership**: This skill writes to `data/raw/`, `data/analysis/scores/`, `reports/`. NEVER modify `apps/` or `src/`.
-- **Privacy**: Truncate wallet addresses in reports (0x1234...5678). Full addresses only in raw data.
-- **Evidence standard**: Every finding MUST have timestamped evidence chain. No claims without data.
-- **Statistical rigor**: Win rate requires minimum 3 trades. Volume anomaly requires 7-day baseline.
-- **No false positives**: Score ≥60 = flagged. Report methodology and thresholds transparently.
-- **Timestamps**: UTC epoch ms in data files. Display as `YYYY-MM-DD HH:mm UTC+7` in reports.
-- **Amounts**: USD format `$1,234.56`. Token amounts preserve original decimals.
-- **Existing scanner**: Reference `apps/insider-scanner/src/scanner/detector/` for consistency with live system.
-- **Cache**: Check `data/cache/` before fetching. TTL = 1 hour.
+1. **Layer 0**: Always skip `0x0000000000000000000000000000000000000000`
+2. **Layer 1**: Always check `userFees` first; skip if `userAddRate ≤ 0` (HFT cache 24h)
+3. **Rate limits**: 1 100 ms between REST calls; 300 ms between pagination pages
+4. **Minimum data**: require at least `ledger` + `clearinghouseState` to produce a score
+5. **scoreB floor**: −8 (never unbounded negative)
+6. **NONE = discard**: scores < 25 are never recorded or alerted
+7. **lossless-json**: mandatory for Hyperliquid API parsing (large integer precision)
+8. **Copin URL**: always `/HYPERLIQUID` uppercase
+9. **Address display**: `0xXXX…XXX` format (first 5 chars + last 3 chars)
+10. **Do not hardcode thresholds** — coin-tier thresholds come from live `metaAndAssetCtxs`
