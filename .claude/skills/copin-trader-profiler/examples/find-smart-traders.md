@@ -10,6 +10,7 @@ Find top smart traders on Hyperliquid in the last 30 days, then deep-profile the
 ```bash
 curl -s -X POST https://api.copin.io/public/HYPERLIQUID/position/statistic/filter \
   -H "Content-Type: application/json" \
+  -H "X-API-KEY: ${COPIN_API_KEY}" \
   -d '{
     "pagination": {"limit": 50, "offset": 0},
     "queries": [{"fieldName": "type", "value": "D30"}],
@@ -31,6 +32,7 @@ curl -s -X POST https://api.copin.io/public/HYPERLIQUID/position/statistic/filte
 ```bash
 curl -s -X POST https://api.copin.io/HYPERLIQUID/position/filter \
   -H "Content-Type: application/json" \
+  -H "X-API-KEY: ${COPIN_API_KEY}" \
   -d '{
     "pagination": {"limit": 50, "offset": 0},
     "queries": [

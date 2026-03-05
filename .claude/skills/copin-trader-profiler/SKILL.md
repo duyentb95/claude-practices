@@ -6,7 +6,7 @@ description: >
   algo trader, MM, HFT, market maker, whale, copy-worthy, trading behavior, sense trading,
   good trader, bad trader, degen, sniper, reverse copy, Copin, trader score, trader ranking,
   wallet analysis, perp DEX trader, Hyperliquid trader, GMX trader, dYdX trader.
-version: 1.0.0
+version: 1.1.0
 author: quant-trading-team
 architecture: Pipeline
 complexity: 17
@@ -26,80 +26,112 @@ Output actionable trader intelligence reports with classification, behavioral fi
 
 ### Copin API Reference
 
-Base URL: `https://api.copin.io`
+> Full reference: `resources/copin-api-reference.md`
+> Source: https://api-docs.copin.io/api-reference/introduction
 
-All POST requests use `Content-Type: application/json`.
+**Base URL:** `https://api.copin.io`
+**Auth:** ALL requests require `X-API-KEY` header from env var `COPIN_API_KEY`
+**Rate limit:** 30 req/min — use 2000ms delay between requests
 
-#### API 1: Trader Statistics (POST)
+```typescript
+// Standard headers for ALL Copin API calls
+const COPIN_HEADERS = {
+  "Content-Type": "application/json",
+  "X-API-KEY": process.env.COPIN_API_KEY  // NEVER hardcode
+};
 ```
-POST https://api.copin.io/public/{PROTOCOL}/position/statistic/filter
+
+```bash
+# Bash equivalent
+-H "Content-Type: application/json" -H "X-API-KEY: ${COPIN_API_KEY}"
+```
+
+Protocol for Hyperliquid: `HYPERLIQUID`
+
+#### API 1: Trader Statistics Filter (POST) — Main discovery endpoint
+```
+POST /public/{PROTOCOL}/position/statistic/filter
+Headers: X-API-KEY: ${COPIN_API_KEY}
 
 Body: {
   "pagination": {"limit": 20, "offset": 0},
-  "queries": [
-    {"fieldName": "type", "value": "D30"}      // D7, D15, D30, D60
-  ],
-  "ranges": [
-    {"fieldName": "FIELD", "gte": NUMBER, "lte": NUMBER}
-  ],
+  "queries": [{"fieldName": "type", "value": "D30"}],
+  "ranges": [{"fieldName": "FIELD", "gte": N, "lte": N}],
   "sortBy": "FIELD",
   "sortType": "desc"
 }
 ```
 
-Available statistic fields (usable in ranges + sortBy):
-```
-PnL:        pnl, realisedPnl, totalGain, totalLoss, realisedTotalGain, realisedTotalLoss
-ROI:        avgRoi, realisedAvgRoi, maxRoi, realisedMaxRoi
-Risk:       maxDrawdown, realisedMaxDrawdown
-Volume:     totalVolume, avgVolume
-Trades:     totalTrade, totalWin, totalLose, totalLiquidation
-Rates:      winRate, profitRate, longRate, orderPositionRatio
-Ratios:     profitLossRatio, gainLossRatio
-Leverage:   avgLeverage, maxLeverage, minLeverage
-Duration:   avgDuration, minDuration, maxDuration (seconds)
-Time:       lastTradeAtTs (epoch ms), runTimeDays
-Fees:       totalFee
-```
+30+ filter fields across: PnL (pnl, realisedPnl, totalGain, totalLoss), ROI (avgRoi, maxRoi),
+Risk (maxDrawdown), Volume (totalVolume, avgVolume), Trades (totalTrade, totalWin, totalLose,
+totalLiquidation), Rates (winRate, profitRate, longRate, orderPositionRatio),
+Ratios (profitLossRatio, gainLossRatio), Leverage (avgLeverage, maxLeverage, minLeverage),
+Duration (avgDuration, minDuration, maxDuration in seconds), Time (lastTradeAtTs, runTimeDays), Fees (totalFee).
 
-Protocol for Hyperliquid: `HYPERLIQUID`
-
-#### API 2: Trader Positions (POST)
+#### API 2: Trader Stats by Account (GET) — Single trader profile
 ```
-POST https://api.copin.io/{PROTOCOL}/position/filter
+GET /{PROTOCOL}/position-statistic/{account}
+Headers: X-API-KEY: ${COPIN_API_KEY}
+```
+Returns all time periods (D7/D15/D30/D60) for one trader.
+
+#### API 3: Positions by Account (POST)
+```
+POST /{PROTOCOL}/position/filter
+Headers: X-API-KEY: ${COPIN_API_KEY}
 
 Body: {
-  "pagination": {"limit": 20, "offset": 0},
+  "pagination": {"limit": 50, "offset": 0},
   "queries": [
     {"fieldName": "account", "value": "0x..."},
-    {"fieldName": "status", "value": "CLOSE"}  // CLOSE or OPEN
+    {"fieldName": "status", "value": "CLOSE"}
   ],
-  "sortBy": "closeBlockTime",
-  "sortType": "desc"
+  "sortBy": "closeBlockTime", "sortType": "desc"
 }
 ```
 
-Position fields: id, account, indexToken, size, fee, collateral, averagePrice, pnl,
-realisedPnl, roi, realisedRoi, isLong, isWin, isLiquidate, leverage, orderCount,
-orderIncreaseCount, orderDecreaseCount, durationInSecond, status, openBlockTime,
-closeBlockTime, protocol
+#### API 4: Position Detail with Orders (GET)
+```
+GET /{PROTOCOL}/position/detail/{positionId}
+Headers: X-API-KEY: ${COPIN_API_KEY}
+```
+Returns position + orders array (types: OPEN, INCREASE, DECREASE, CLOSE, MARGIN_TRANSFERRED, LIQUIDATE)
 
-#### API 3: Position Details (GET)
+#### API 5: Leaderboard (GET)
 ```
-GET https://api.copin.io/{PROTOCOL}/position/detail/{positionId}
-```
-Returns position + all orders (OPEN, INCREASE, DECREASE, CLOSE, MARGIN_TRANSFERRED, LIQUIDATE)
-
-#### API 4: Leaderboard (GET)
-```
-GET https://api.copin.io/leaderboards/page?protocol={PROTOCOL}&queryDate={timestamp_ms}&statisticType={WEEK|MONTH}&limit=20&offset=0&sort_by=ranking&sort_type=asc
+GET /leaderboards/page?protocol=HYPERLIQUID&queryDate={epoch_ms}&statisticType=MONTH&limit=20&offset=0&sort_by=ranking&sort_type=asc
+Headers: X-API-KEY: ${COPIN_API_KEY}
 ```
 
-#### API 5: Open Interest (POST)
+#### API 6: Open Interest (POST)
 ```
-POST https://api.copin.io/{PROTOCOL}/top-positions/opening
-
+POST /{PROTOCOL}/top-positions/opening
+Headers: X-API-KEY: ${COPIN_API_KEY}
 Body: {"pagination": {"limit": 100, "offset": 0}, "sortBy": "size", "sortType": "desc"}
+```
+
+#### API 7: Live Orders (POST) — Real-time
+```
+POST /order/filter/graphql
+Headers: X-API-KEY: ${COPIN_API_KEY}
+```
+
+#### API 8: Live Positions (POST) — Real-time
+```
+POST /position/filter/graphql
+Headers: X-API-KEY: ${COPIN_API_KEY}
+```
+
+#### API 9: Search After (POST) — Efficient cursor-based pagination for large scans
+```
+POST /position-statistic/filter/search-after
+Headers: X-API-KEY: ${COPIN_API_KEY}
+```
+
+#### API 10: PnL Statistic (POST)
+```
+POST /position-statistic/pnl
+Headers: X-API-KEY: ${COPIN_API_KEY}
 ```
 
 ### Step 1: Data Collection
@@ -367,6 +399,7 @@ Find top smart traders on Hyperliquid in the last 30 days
 **API Call:**
 ```json
 POST https://api.copin.io/public/HYPERLIQUID/position/statistic/filter
+Headers: X-API-KEY: ${COPIN_API_KEY}
 
 {
   "pagination": {"limit": 50, "offset": 0},
@@ -408,6 +441,7 @@ Find suspicious insider-like traders on Hyperliquid — high win rate, few trade
 **API Call:**
 ```json
 POST https://api.copin.io/public/HYPERLIQUID/position/statistic/filter
+Headers: X-API-KEY: ${COPIN_API_KEY}
 
 {
   "pagination": {"limit": 50, "offset": 0},
@@ -438,6 +472,9 @@ Find likely algorithmic traders or market makers on Hyperliquid
 
 **API Call:**
 ```json
+POST https://api.copin.io/public/HYPERLIQUID/position/statistic/filter
+Headers: X-API-KEY: ${COPIN_API_KEY}
+
 {
   "pagination": {"limit": 50, "offset": 0},
   "queries": [{"fieldName": "type", "value": "D30"}],
@@ -469,7 +506,8 @@ Profile trader 0xABCD1234 on Hyperliquid — full classification
 
 ## Constraints
 
-- **API rate limiting**: Copin API has no documented rate limit, but implement 100ms delay between requests as courtesy.
+- **API key required**: ALL Copin API calls MUST include `X-API-KEY: ${COPIN_API_KEY}` header. Load from `process.env.COPIN_API_KEY` or `${COPIN_API_KEY}` in bash. NEVER hardcode the key.
+- **Rate limit strict**: 30 req/min. Use 2000ms delay between requests. Queue, don't parallelize.
 - **Protocol string**: For Hyperliquid, always use `HYPERLIQUID` exactly. Case-sensitive.
 - **Time periods**: `D7` (7 days), `D15` (15 days), `D30` (30 days), `D60` (60 days) for statistics.
 - **Minimum sample**: Never classify a trader with < 5 trades. Insufficient data = "Unclassifiable".
@@ -481,3 +519,6 @@ Profile trader 0xABCD1234 on Hyperliquid — full classification
 - **Cross-reference**: When used alongside `insider-detector` skill, merge Copin data with Hyperliquid direct API data for richer analysis.
 - **MM/HFT whitelist**: Wallets classified as algo/MM/HFT should be excluded from insider detection to reduce false positives. Export whitelist to `data/analysis/traders/mm_hft_whitelist.json`.
 - **Copin web links**: Include `https://app.copin.io/trader/{address}/hyperliquid` links in reports for easy reference.
+- **Live Trade endpoints**: Use Live Order/Position GraphQL endpoints for real-time monitoring use cases. These show orders/positions happening NOW.
+- **Search After pagination**: For scanning >1000 traders, use `/position-statistic/filter/search-after` instead of offset-based pagination for better performance.
+- **Error handling**: On non-200 responses, log status code and response body. Common errors: 401 (bad API key), 429 (rate limit), 500 (server error).
