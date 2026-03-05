@@ -1,0 +1,9 @@
+# Data files (generated at runtime)
+data/
+reports/
+scripts/backtest_*
+scripts/dashboard_*
+
+# Cache
+*.cache
+__pycache__/
