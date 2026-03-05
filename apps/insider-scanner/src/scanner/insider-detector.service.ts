@@ -366,12 +366,11 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
-
       // Fetch ledger first (key signal: deposit-to-trade gap)
       const ledger = await this.infoService.getUserNonFundingLedger(address);
       await sleep(400);
-      const fills = await this.infoService.getUserFills(address, ninetyDaysAgo);
+      // Paginated all-time fills (up to 10k, aggregated by order)
+      const allFills = await this.infoService.getUserFillsPaginated(address);
       await sleep(400);
       const state = await this.infoService.getClearinghouseState(address);
 
@@ -380,7 +379,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       const accountValue = parseFloat(state.marginSummary?.accountValue ?? '0');
 
       // Composite scoring from FRESH_DEPOSIT_STRATEGY
-      const scoring = this.scoreTrader(trade, ledger, fills, state);
+      const scoring = this.scoreTrader(trade, ledger, allFills, state);
 
       // Merge extra flags into trade record
       for (const f of scoring.extraFlags) {
@@ -388,11 +387,13 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Backwards-compat flags based on 90-day fill count
-      if (fills.length === 0) {
+      const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const fills90dCount = allFills.filter((f) => f.time >= ninetyDaysAgo).length;
+      if (fills90dCount === 0) {
         if (!trade.flags.includes(InsiderFlag.FIRST_TIMER)) {
           trade.flags.push(InsiderFlag.FIRST_TIMER);
         }
-      } else if (fills.length < newTraderFillsThreshold) {
+      } else if (fills90dCount < newTraderFillsThreshold) {
         if (!trade.flags.includes(InsiderFlag.NEW_ACCOUNT)) {
           trade.flags.push(InsiderFlag.NEW_ACCOUNT);
         }
@@ -403,7 +404,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
       const profile: TraderProfile = {
         address,
-        fillCount90d: fills.length,
+        fillCount90d: fills90dCount,
         accountValue,
         fetchedAt: Date.now(),
       };
@@ -490,9 +491,12 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     else if (walletAgeDays < 14) scoreB += 4;
     else if (walletAgeDays < 30) scoreB += 2;
 
-    const fillCount = fills.length;
-    // 2000 is the Hyperliquid REST hard cap — a wallet at cap is an established high-frequency
-    // trader, the opposite of a fresh insider profile: apply a penalty instead of a bonus.
+    // 90-day fill count (for freshness & win-rate scoring)
+    const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const fills90d = fills.filter(f => f.time >= ninetyDaysAgo);
+    const fillCount = fills90d.length;
+
+    // >=2000 aggregated orders in 90d = high-frequency established trader, not fresh insider
     if (fillCount >= 2000) {
       scoreB -= 5;
     } else if (fillCount === 0)  scoreB += 10;
@@ -500,10 +504,10 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     else if   (fillCount <= 10)  scoreB += 5;
     else if   (fillCount <= 30)  scoreB += 2;
 
-    // ── Win rate penalty (chronic losers are not acting on information edge) ─
-    const closedFills = fills.filter(f => parseFloat(f.closedPnl ?? '0') !== 0);
+    // ── Win rate (90d) — chronic losers are not acting on information edge ───
+    const closedFills = fills90d.filter(f => parseFloat(f.closedPnl ?? '0') !== 0);
     const winRate = closedFills.length >= 10
-      ? fills.filter(f => parseFloat(f.closedPnl ?? '0') > 0).length / closedFills.length
+      ? fills90d.filter(f => parseFloat(f.closedPnl ?? '0') > 0).length / closedFills.length
       : null; // insufficient data — skip
 
     if (winRate !== null) {
@@ -512,6 +516,16 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       else if (winRate < 0.50) scoreB -= 3;
       else if (winRate > 0.70) scoreB += 5;
       else if (winRate > 0.60) scoreB += 3;
+    }
+
+    // ── All-time PnL — positive PnL signals informed/skilled trader ──────────
+    // Uses all paginated fills (up to 10k) for maximum accuracy.
+    if (fills.length > 0) {
+      const allTimePnl = fills.reduce((sum, f) => sum + parseFloat(f.closedPnl ?? '0'), 0);
+      if      (allTimePnl > 10_000) scoreB += 4;
+      else if (allTimePnl > 0)      scoreB += 2;
+      else if (allTimePnl < -10_000) scoreB -= 5;
+      else if (allTimePnl < 0)      scoreB -= 3;
     }
 
     scoreB = Math.min(20, Math.max(-8, scoreB));

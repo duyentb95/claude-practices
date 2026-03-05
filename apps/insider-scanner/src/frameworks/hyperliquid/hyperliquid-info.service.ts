@@ -119,6 +119,50 @@ export class HyperliquidInfoService {
   }
 
   /**
+   * Fetch up to maxFills most recent fills by paginating backwards through time.
+   * Uses aggregateByTime=true so each record represents one order (not a raw fill).
+   * Hyperliquid caps each page at 2000 records and exposes at most the 10 000
+   * most recent fills total — so 5 pages × 2000 = 10 000 max.
+   * A 300 ms pause is inserted between pages to stay within rate limits.
+   */
+  async getUserFillsPaginated(
+    address: string,
+    maxFills = 10_000,
+  ): Promise<HyperFillDto[]> {
+    const PAGE_SIZE = 2_000;
+    const all: HyperFillDto[] = [];
+    let endTime = Date.now();
+
+    while (all.length < maxFills) {
+      const page = await this.postInfo<HyperFillDto[]>(
+        {
+          type: 'userFillsByTime',
+          user: address,
+          startTime: 0,
+          endTime,
+          aggregateByTime: true,
+        },
+        [],
+      );
+
+      if (!page || page.length === 0) break;
+
+      all.push(...page);
+
+      if (page.length < PAGE_SIZE) break; // last page — no more data available
+
+      // Paginate to older fills: set endTime just before the earliest fill in this page
+      const minTime = Math.min(...page.map((f) => f.time));
+      endTime = minTime - 1;
+      if (endTime <= 0) break;
+
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    return all.slice(0, maxFills);
+  }
+
+  /**
    * Fetch current account state: margin summary, positions, withdrawable.
    */
   async getClearinghouseState(
