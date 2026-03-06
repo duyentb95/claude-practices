@@ -91,6 +91,11 @@ tr:hover td{background:var(--bg-hover)}
 .b-ghost{background:rgba(188,140,255,.12);color:var(--magenta);border:1px solid rgba(188,140,255,.25)}
 .b-one  {background:rgba(188,140,255,.2); color:var(--magenta);border:1px solid rgba(188,140,255,.45);font-weight:700}
 .b-fresh{background:rgba(57,197,207,.12); color:var(--cyan);   border:1px solid rgba(57,197,207,.3)}
+/* Copin archetype badges */
+.b-algo  {background:rgba(139,148,158,.12);color:var(--dim);   border:1px solid rgba(139,148,158,.25)}
+.b-smart {background:rgba(63,185,80,.12);  color:var(--green); border:1px solid rgba(63,185,80,.25)}
+.b-degen {background:rgba(248,81,73,.1);   color:var(--red);   border:1px solid rgba(248,81,73,.2)}
+.b-isusp {background:rgba(210,153,34,.18); color:var(--yellow);border:1px solid rgba(210,153,34,.4);font-weight:700}
 
 /* ─ Misc ─────────────────────────────────────── */
 .addr{font-size:11px}
@@ -280,7 +285,8 @@ function filteredSuspects(){
       || (s.coins||[]).some(function(c){ return c.toLowerCase().indexOf(q) >= 0; })
       || (s.alertLevel||'').toLowerCase().indexOf(q) >= 0
       || (s.walletType||'').toLowerCase().indexOf(q) >= 0
-      || (s.flags||[]).some(function(f){ return f.toLowerCase().indexOf(q) >= 0; });
+      || (s.flags||[]).some(function(f){ return f.toLowerCase().indexOf(q) >= 0; })
+      || ((s.copinProfile&&s.copinProfile.archetype)||'').toLowerCase().indexOf(q) >= 0;
   });
 }
 
@@ -346,7 +352,9 @@ function flagBadges(arr){
     if(f==='HIGH_LEV')  return '<span class="badge b-new">⚠HIGH_LEV</span>';
     if(f==='DEAD_MKT')  return '<span class="badge b-large">💀DEAD_MKT</span>';
     if(f==='HIGH_OI')   return '<span class="badge b-new">📊HIGH_OI</span>';
-    if(f==='HFT')       return '<span class="badge" style="background:rgba(139,148,158,.1);color:#8b949e;border:1px solid rgba(139,148,158,.25)">🤖HFT</span>';
+    if(f==='HFT')        return '<span class="badge b-algo">🤖HFT</span>';
+    if(f==='COPIN_SUSP') return '<span class="badge b-isusp">🎯COPIN</span>';
+    if(f==='SMART')      return '<span class="badge b-smart">🧠SMART</span>';
     return '<span class="badge b-large">'+esc(f)+'</span>';
   }).join(' ');
 }
@@ -363,6 +371,26 @@ function alertLevelBadge(lvl, score){
   return '<span class="badge '+pair[0]+'" title="Score: '+(score||0)+'/100">'
        + pair[1]+' '+(score||0)
        + '</span>';
+}
+
+// ─ Copin archetype badge ──────────────────────────────────────────────────────
+function copinBadge(cp){
+  if(!cp) return '<span class="cd f10">—</span>';
+  var arch = cp.archetype||'UNKNOWN';
+  if(arch==='UNKNOWN') return '<span class="cd f10">—</span>';
+  var cfgMap = {
+    ALGO_HFT:        ['b-algo',  '🤖ALGO'],
+    SMART_TRADER:    ['b-smart', '🧠SMART'],
+    DEGEN:           ['b-degen', '💀DEGEN'],
+    INSIDER_SUSPECT: ['b-isusp', '🎯SUSP'],
+    NORMAL:          ['b-large', 'NORM'],
+  };
+  var pair = cfgMap[arch] || ['b-large', esc(arch)];
+  var d30 = cp.d30;
+  var tip = arch+' (conf '+(Math.round((cp.confidence||0)*100))+'%)';
+  if(cp.signals && cp.signals.length) tip += '\n'+cp.signals.join(', ');
+  if(d30) tip += '\nWR '+d30.winRate.toFixed(0)+'% | '+d30.totalTrade+' trades | '+d30.totalLiquidation+' liq | '+d30.runTimeDays+'d';
+  return '<span class="badge '+pair[0]+'" title="'+esc(tip)+'">'+pair[1]+'</span>';
 }
 
 // ─ Render trades (slice of page) ──────────────────────────────────────────────
@@ -452,7 +480,7 @@ function renderSuspectRows(slice){
   if(!slice||!slice.length) return '<div class="empty">No suspects detected yet…</div>';
   var threshold = 30;
   var h = '<table><thead><tr>'
-    + '<th>Wallet</th><th>Score</th><th class="r">Total USD</th><th class="c">Trades</th>'
+    + '<th>Wallet</th><th>Score</th><th>Copin</th><th class="r">Total USD</th><th class="c">Trades</th>'
     + '<th class="r">Acct Value</th><th class="r">90d Fills</th>'
     + '<th>Coins</th><th>Flags</th>'
     + '</tr></thead><tbody>';
@@ -486,6 +514,7 @@ function renderSuspectRows(slice){
       + '<td><span class="addr '+ac+'" title="'+esc(s.address)+'">'+esc(shortAddr(s.address))+'</span>'
       + ' <a href="'+url+'" target="_blank" rel="noopener" class="copin">↗</a></td>'
       + '<td>'+alertLevelBadge(lvl, s.insiderScore)+'</td>'
+      + '<td>'+copinBadge(s.copinProfile)+'</td>'
       + '<td class="r"><span class="bold co">'+fmtUsd(s.totalUsd)+'</span></td>'
       + '<td class="c cd">'+s.tradeCount+'</td>'
       + '<td class="r">'+acct+'</td>'
@@ -641,6 +670,7 @@ export class AppController {
         alertLevel: s.alertLevel,
         walletType: s.walletType,
         depositToTradeGapMs: s.depositToTradeGapMs,
+        copinProfile: s.copinProfile ?? null,
       })),
       logs: this.detector.logs,
       minTradeUsd,

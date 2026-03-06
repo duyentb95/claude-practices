@@ -25,6 +25,10 @@ export enum InsiderFlag {
 
   // Noise filter flags (skipped from suspect list)
   HFT_PATTERN    = 'HFT',      // userAddRate <= 0 via Copin API → market maker / HFT, skip inspection
+
+  // Copin-derived flags (v3.0)
+  COPIN_SUSPICIOUS = 'COPIN_SUSP',  // Copin: high win rate + few trades + short hold → insider pattern
+  SMART_TRADER     = 'SMART',       // Copin: established profitable trader (FP signal)
 }
 
 export enum AlertLevel {
@@ -93,8 +97,26 @@ export interface InsiderScore {
     scoreC: number;   // Trade Size vs Market     0-20
     scoreD: number;   // Position Concentration   0-15
     scoreE: number;   // Ledger Purity            0-10
+    scoreG: number;   // Copin Behavioral Score   -10 to +15
     multiplier: number;
   };
+}
+
+/** Copin classification snapshot stored on suspect entry */
+export interface CopinProfile {
+  archetype: 'ALGO_HFT' | 'SMART_TRADER' | 'DEGEN' | 'INSIDER_SUSPECT' | 'NORMAL' | 'UNKNOWN';
+  confidence: number;
+  signals: string[];
+  scoreG: number;
+  d30: {
+    winRate: number;
+    totalTrade: number;
+    totalLiquidation: number;
+    realisedPnl: number;
+    avgLeverage: number;
+    avgDuration: number;   // seconds
+    runTimeDays: number;
+  } | null;
 }
 
 /** Aggregate suspect entry built up over time */
@@ -113,6 +135,9 @@ export interface SuspectEntry {
   alertLevel: AlertLevel;
   walletType: WalletType | null;
   depositToTradeGapMs: number | null;  // last known deposit-to-trade gap
+
+  // Copin behavioral classification (v3.0, may be null if Copin disabled/unavailable)
+  copinProfile: CopinProfile | null;
 }
 
 /** WebSocket connection stats */

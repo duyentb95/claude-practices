@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Interval } from '@nestjs/schedule';
 import {
   AlertLevel,
+  CopinProfile,
   InsiderFlag,
   InsiderScore,
   LargeTrade,
@@ -11,6 +12,7 @@ import {
   WalletType,
 } from './dto/trade.dto';
 import {
+  copinWhitelistRefreshMs,
   maxSuspects,
   maxTradeHistory,
   megaTradeUsd,
@@ -21,6 +23,7 @@ import {
 import { WsScannerService } from './ws-scanner.service';
 import { RateLimiterService } from './rate-limiter.service';
 import { HyperliquidInfoService } from '../frameworks/hyperliquid/hyperliquid-info.service';
+import { CopinInfoService } from '../frameworks/copin/copin-info.service';
 import { LarkAlertService } from './lark-alert.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -98,6 +101,10 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   /** Addresses currently being inspected (dedup in-flight) */
   private readonly inspecting = new Set<string>();
 
+  /** Copin Layer 2 whitelists (refreshed every 6h) */
+  private algoWhitelist        = new Set<string>();
+  private smartTraderWhitelist = new Set<string>();
+
   /**
    * Aggregation buffers: key = `${address}:${coin}:${side}`.
    * Tracks BOTH the buyer (users[0]) and the seller (users[1]) of every fill,
@@ -118,13 +125,15 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     private readonly scanner: WsScannerService,
     private readonly rateLimiter: RateLimiterService,
     private readonly infoService: HyperliquidInfoService,
+    private readonly copinService: CopinInfoService,
     private readonly lark: LarkAlertService,
   ) {}
 
   onModuleInit() {
     this.scanner.onTrade((raw) => this.bufferTrade(raw));
-    // Warm coin tiers immediately on startup
+    // Warm coin tiers and Copin whitelists immediately on startup
     this.refreshCoinTiers();
+    this.refreshCopinWhitelists();
   }
 
   onModuleDestroy() {
@@ -180,6 +189,27 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
   private getCoinThreshold(coin: string): number {
     return this.coinTiers.get(coin)?.notionalThreshold ?? minTradeUsd;
+  }
+
+  // ─── Copin whitelist refresh ──────────────────────────────────────────────────
+
+  @Interval(copinWhitelistRefreshMs)
+  async refreshCopinWhitelists() {
+    try {
+      const [algoAddrs, smartAddrs] = await Promise.all([
+        this.copinService.fetchAlgoTraderAddresses(),
+        this.copinService.fetchSmartTraderAddresses(),
+      ]);
+      this.algoWhitelist        = new Set(algoAddrs);
+      this.smartTraderWhitelist = new Set(smartAddrs);
+      if (algoAddrs.length || smartAddrs.length) {
+        this.logger.log(
+          `[Copin] Whitelists refreshed — algo: ${algoAddrs.length}, smart: ${smartAddrs.length}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`refreshCopinWhitelists: ${(e as Error).message}`);
+    }
   }
 
   // ─── Aggregation buffer (sliding window, both sides) ─────────────────────────
@@ -366,6 +396,24 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      // Layer 2a: Copin algo whitelist (in-memory, fast — bulk-refreshed every 6h)
+      if (this.algoWhitelist.has(address.toLowerCase())) {
+        this.addLog(`[Copin L2] Skip ${address.slice(0, 12)}… (algo whitelist)`);
+        return;
+      }
+
+      // Copin: classify trader behaviorally (D30 stats, cached 30 min)
+      // Done BEFORE HL fetches so ALGO_HFT can fast-fail and save HL quota.
+      const copinClass = await this.copinService.getClassification(address);
+
+      // Layer 2b: Copin-confirmed ALGO/HFT (not caught by userFees — taker-fee algos)
+      if (copinClass.archetype === 'ALGO_HFT' && copinClass.confidence >= 0.8) {
+        this.addLog(
+          `[Copin L2b] Skip ${address.slice(0, 12)}… ALGO_HFT (${copinClass.signals[0] ?? ''})`,
+        );
+        return;
+      }
+
       // Fetch ledger first (key signal: deposit-to-trade gap)
       const ledger = await this.infoService.getUserNonFundingLedger(address);
       await sleep(400);
@@ -378,8 +426,8 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
       const accountValue = parseFloat(state.marginSummary?.accountValue ?? '0');
 
-      // Composite scoring from FRESH_DEPOSIT_STRATEGY
-      const scoring = this.scoreTrader(trade, ledger, allFills, state);
+      // Composite scoring A+B+C+D+E+G × F
+      const scoring = this.scoreTrader(trade, ledger, allFills, state, copinClass);
 
       // Merge extra flags into trade record
       for (const f of scoring.extraFlags) {
@@ -402,6 +450,19 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       // Only upsert suspects that score above LOW threshold
       if (scoring.alertLevel === AlertLevel.NONE) return;
 
+      // Smart trader FP filter: Copin-confirmed smart trader needs score ≥ HIGH (55)
+      // to appear as suspect — avoids flagging established traders for large-but-normal trades.
+      if (
+        copinClass.archetype === 'SMART_TRADER' &&
+        copinClass.confidence >= 0.8 &&
+        scoring.finalScore < 55
+      ) {
+        this.addLog(
+          `[Copin FP] Skip ${address.slice(0, 12)}… SMART_TRADER score=${scoring.finalScore} < 55`,
+        );
+        return;
+      }
+
       const profile: TraderProfile = {
         address,
         fillCount90d: fills90dCount,
@@ -409,9 +470,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         fetchedAt: Date.now(),
       };
 
-      this.upsertSuspect(address, trade, profile, scoring);
+      this.upsertSuspect(address, trade, profile, scoring, copinClass);
     } catch (e) {
-      this.logger.error(`inspectTrader(${address}): ${e.message}`);
+      this.logger.error(`inspectTrader(${address}): ${(e as Error).message}`);
     }
   }
 
@@ -422,6 +483,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     ledger: any[],
     fills: any[],
     state: any,
+    copinClass: CopinProfile = { archetype: 'UNKNOWN', confidence: 0, signals: [], scoreG: 0, d30: null },
   ): InsiderScore {
     const extraFlags: InsiderFlag[] = [];
 
@@ -590,18 +652,34 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     if (!ledgerTypes.has('rewardsClaim') && walletAgeDays < 30) scoreE += 2;
     scoreE = Math.min(10, scoreE);
 
+    // ── [G] Copin Behavioral Score (−10 to +15) ──────────────────────────────
+
+    const scoreG = copinClass.scoreG;
+
+    // Copin-derived flags
+    if (copinClass.archetype === 'INSIDER_SUSPECT' && copinClass.scoreG >= 5) {
+      extraFlags.push(InsiderFlag.COPIN_SUSPICIOUS);
+    }
+    if (copinClass.archetype === 'SMART_TRADER') {
+      extraFlags.push(InsiderFlag.SMART_TRADER);
+    }
+
     // ── [F] Behavioral Multiplier (×1.0–1.5) ─────────────────────────────────
 
     let multiplier = 1.0;
-    const hasImmediate  = scoreA >= 22;          // deposit < 15 min
-    const hasFreshWallet = fillCount === 0 || walletAgeDays < 1;
-    const hasAllIn      = extraFlags.includes(InsiderFlag.ALL_IN);
-    const hasDeadMarket = extraFlags.includes(InsiderFlag.DEAD_MARKET);
+    const hasImmediate    = scoreA >= 22;          // deposit < 15 min
+    const hasFreshWallet  = fillCount === 0 || walletAgeDays < 1;
+    const hasAllIn        = extraFlags.includes(InsiderFlag.ALL_IN);
+    const hasDeadMarket   = extraFlags.includes(InsiderFlag.DEAD_MARKET);
+    const hasCopinSuspect = extraFlags.includes(InsiderFlag.COPIN_SUSPICIOUS);
 
-    if (hasImmediate && hasFreshWallet)             multiplier += 0.20;
-    if (hasImmediate && hasAllIn)                   multiplier += 0.15;
-    if (hasFreshWallet && hasDeadMarket)            multiplier += 0.15;
-    if (hasImmediate && hasFreshWallet && hasAllIn) multiplier += 0.10; // triple combo
+    if (hasImmediate && hasFreshWallet)                        multiplier += 0.20;
+    if (hasImmediate && hasAllIn)                              multiplier += 0.15;
+    if (hasFreshWallet && hasDeadMarket)                       multiplier += 0.15;
+    if (hasImmediate && hasFreshWallet && hasAllIn)            multiplier += 0.10; // triple combo
+    // Copin combos (v3.0)
+    if (hasCopinSuspect && hasImmediate)                       multiplier += 0.10;
+    if (hasCopinSuspect && hasFreshWallet && hasAllIn)         multiplier += 0.15;
     multiplier = Math.min(1.5, multiplier);
 
     // ── Wallet type classification ────────────────────────────────────────────
@@ -624,9 +702,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       walletType = WalletType.NORMAL;
     }
 
-    // ── Final score ───────────────────────────────────────────────────────────
+    // ── Final score (A+B+C+D+E+G) × F, capped 100 ───────────────────────────
 
-    const rawScore  = scoreA + scoreB + scoreC + scoreD + scoreE;
+    const rawScore   = scoreA + scoreB + scoreC + scoreD + scoreE + scoreG;
     const finalScore = Math.min(100, Math.round(rawScore * multiplier));
 
     let alertLevel: AlertLevel;
@@ -642,7 +720,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       walletType,
       depositToTradeGapMs,
       extraFlags,
-      components: { scoreA, scoreB, scoreC, scoreD, scoreE, multiplier },
+      components: { scoreA, scoreB, scoreC, scoreD, scoreE, scoreG, multiplier },
     };
   }
 
@@ -653,6 +731,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     trade: LargeTrade,
     profile: TraderProfile,
     scoring: InsiderScore,
+    copinClass?: CopinProfile,
   ) {
     const existing = this.suspects.get(address);
 
@@ -674,6 +753,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       if (scoring.depositToTradeGapMs !== null) {
         existing.depositToTradeGapMs = scoring.depositToTradeGapMs;
       }
+      if (copinClass && copinClass.archetype !== 'UNKNOWN') {
+        existing.copinProfile = copinClass;
+      }
     } else {
       const newSuspect: SuspectEntry = {
         address,
@@ -688,6 +770,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         alertLevel: scoring.alertLevel,
         walletType: scoring.walletType,
         depositToTradeGapMs: scoring.depositToTradeGapMs,
+        copinProfile: (copinClass?.archetype !== 'UNKNOWN' ? copinClass : null) ?? null,
       };
       this.suspects.set(address, newSuspect);
       this.scanner.stats.suspectsFound = this.suspects.size;
