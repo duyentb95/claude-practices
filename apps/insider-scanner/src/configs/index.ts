@@ -58,10 +58,11 @@ export const larkAlertCooldownMs = parseInt(
 
 // ─── Copin Analyzer API ────────────────────────────────────────────────────────
 
-export const copinApiKey   = process.env.COPIN_API_KEY ?? '';
+// Support both COPIN_API_KEY (new) and X_API_KEY (legacy Railway variable name)
+export const copinApiKey   = process.env.COPIN_API_KEY || process.env.X_API_KEY || '';
 export const copinApiUrl   = process.env.COPIN_API_URL ?? 'https://api.copin.io';
-// Whether Copin integration is active (requires COPIN_API_KEY)
-export const copinEnabled  = process.env.COPIN_ENABLED !== 'false' && !!process.env.COPIN_API_KEY;
+// Whether Copin integration is active (requires COPIN_API_KEY or X_API_KEY)
+export const copinEnabled  = process.env.COPIN_ENABLED !== 'false' && !!copinApiKey;
 // Minimum ms between Copin REST calls (30 req/min limit → 2000ms)
 export const copinRateLimitMs = parseInt(process.env.COPIN_RATE_LIMIT_MS || '2000');
 // How often to refresh algo/smart-trader whitelists (default 6h)
