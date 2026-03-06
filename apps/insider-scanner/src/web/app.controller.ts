@@ -388,8 +388,8 @@ function copinBadge(cp){
   var pair = cfgMap[arch] || ['b-large', esc(arch)];
   var d30 = cp.d30;
   var tip = arch+' (conf '+(Math.round((cp.confidence||0)*100))+'%)';
-  if(cp.signals && cp.signals.length) tip += '\n'+cp.signals.join(', ');
-  if(d30) tip += '\nWR '+d30.winRate.toFixed(0)+'% | '+d30.totalTrade+' trades | '+d30.totalLiquidation+' liq | '+d30.runTimeDays+'d';
+  if(cp.signals && cp.signals.length) tip += ' | '+cp.signals.join(', ');
+  if(d30) tip += ' | WR '+d30.winRate.toFixed(0)+'% '+d30.totalTrade+'T '+d30.totalLiquidation+'liq '+d30.runTimeDays+'d';
   return '<span class="badge '+pair[0]+'" title="'+esc(tip)+'">'+pair[1]+'</span>';
 }
 
