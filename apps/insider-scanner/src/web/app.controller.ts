@@ -1,7 +1,7 @@
 import { Controller, Get, Header } from '@nestjs/common';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
-import { minTradeUsd, megaTradeUsd } from '../configs';
+import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
 
 // ─── Embedded HTML dashboard ──────────────────────────────────────────────────
 
@@ -675,6 +675,7 @@ export class AppController {
       logs: this.detector.logs,
       minTradeUsd,
       megaTradeUsd,
+      copinEnabled,
       uptime: Date.now() - this.startedAt,
     };
   }
