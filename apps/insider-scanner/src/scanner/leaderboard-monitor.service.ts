@@ -20,9 +20,17 @@ export class LeaderboardMonitorService implements OnModuleInit {
   constructor(private readonly copinService: CopinInfoService) {}
 
   onModuleInit() {
-    this.refreshLeaderboard().catch((e) =>
-      this.logger.warn(`LeaderboardMonitor init failed: ${(e as Error).message}`),
-    );
+    this.refreshLeaderboard()
+      .then(() => {
+        // If initial fetch returned nothing (transient API error), retry once after 5 min
+        if (!this.lastRefreshedAt) {
+          this.logger.log('[Leaderboard] Scheduling retry in 5 min…');
+          setTimeout(() => this.refreshLeaderboard().catch(() => null), 5 * 60 * 1000);
+        }
+      })
+      .catch((e) =>
+        this.logger.warn(`LeaderboardMonitor init failed: ${(e as Error).message}`),
+      );
   }
 
   @Interval(leaderboardRefreshMs)
