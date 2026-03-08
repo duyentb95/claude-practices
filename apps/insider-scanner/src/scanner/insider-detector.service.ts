@@ -204,11 +204,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       ]);
       this.algoWhitelist        = new Set(algoAddrs);
       this.smartTraderWhitelist = new Set(smartAddrs);
-      if (algoAddrs.length || smartAddrs.length) {
-        this.logger.log(
-          `[Copin] Whitelists refreshed — algo: ${algoAddrs.length}, smart: ${smartAddrs.length}`,
-        );
-      }
+      this.logger.warn(
+        `[Copin] Whitelists refreshed — algo: ${algoAddrs.length}, smart: ${smartAddrs.length}`,
+      );
     } catch (e) {
       this.logger.warn(`refreshCopinWhitelists: ${(e as Error).message}`);
     }

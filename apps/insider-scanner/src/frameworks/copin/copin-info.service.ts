@@ -123,7 +123,7 @@ export class CopinInfoService implements OnModuleInit {
         limit,
       );
       const addrs = this.extractAddresses(data);
-      this.logger.log(`[Leaderboard] Copin returned ${addrs.length} addresses (total=${data?.total ?? '?'})`);
+      this.logger.warn(`[Leaderboard] Copin returned ${addrs.length} addresses (total=${data?.total ?? '?'})`);
       return addrs;
     } catch (e) {
       this.logger.warn(`Copin leaderboard fetch failed: ${(e as Error).message}`);
