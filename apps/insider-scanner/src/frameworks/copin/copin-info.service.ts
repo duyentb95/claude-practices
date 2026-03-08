@@ -105,6 +105,39 @@ export class CopinInfoService implements OnModuleInit {
   }
 
   /**
+   * Bulk-fetch top-N addresses by 30-day realised PnL.
+   * Used by LeaderboardMonitorService to pre-warm cache and detect unusual-coin trades.
+   */
+  async fetchLeaderboardAddresses(limit = 100): Promise<string[]> {
+    if (!copinEnabled) return [];
+    await this.rateLimit();
+    try {
+      const res = await fetch(`${copinApiUrl}/public/${PROTOCOL}/position/statistic/filter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-KEY': copinApiKey },
+        body: JSON.stringify({
+          pagination: { limit, offset: 0 },
+          queries:    [{ fieldName: 'type', value: 'D30' }],
+          ranges: [
+            { fieldName: 'realisedPnl', gte: 0 },
+            { fieldName: 'totalTrade',  gte: 5 },
+            { fieldName: 'runTimeDays', gte: 7 },
+          ],
+          sortBy:   'realisedPnl',
+          sortType: 'desc',
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return this.extractAddresses(data);
+    } catch (e) {
+      this.logger.warn(`Copin leaderboard fetch failed: ${(e as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
    * Bulk-fetch addresses of established smart traders on Hyperliquid.
    * Used to build smart-trader whitelist (increases FP-filter threshold to 55).
    */

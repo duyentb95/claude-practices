@@ -1,6 +1,7 @@
 import { Controller, Get, Header } from '@nestjs/common';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
+import { LeaderboardMonitorService } from '../scanner/leaderboard-monitor.service';
 import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
 
 // ─── Embedded HTML dashboard ──────────────────────────────────────────────────
@@ -355,6 +356,8 @@ function flagBadges(arr){
     if(f==='HFT')        return '<span class="badge b-algo">🤖HFT</span>';
     if(f==='COPIN_SUSP') return '<span class="badge b-isusp">🎯COPIN</span>';
     if(f==='SMART')      return '<span class="badge b-smart">🧠SMART</span>';
+    if(f==='LINKED')     return '<span class="badge b-isusp">🔗LINKED</span>';
+    if(f==='LB_COIN')    return '<span class="badge b-new">📋LB_COIN</span>';
     return '<span class="badge b-large">'+esc(f)+'</span>';
   }).join(' ');
 }
@@ -643,6 +646,7 @@ export class AppController {
   constructor(
     private readonly detector: InsiderDetectorService,
     private readonly scanner: WsScannerService,
+    private readonly leaderboardMonitor: LeaderboardMonitorService,
   ) {}
 
   @Get('/')
@@ -676,6 +680,7 @@ export class AppController {
       minTradeUsd,
       megaTradeUsd,
       copinEnabled,
+      leaderboard: this.leaderboardMonitor.getStats(),
       uptime: Date.now() - this.startedAt,
     };
   }

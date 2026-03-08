@@ -25,6 +25,7 @@ import { RateLimiterService } from './rate-limiter.service';
 import { HyperliquidInfoService } from '../frameworks/hyperliquid/hyperliquid-info.service';
 import { CopinInfoService } from '../frameworks/copin/copin-info.service';
 import { LarkAlertService } from './lark-alert.service';
+import { LeaderboardMonitorService } from './leaderboard-monitor.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,6 +128,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     private readonly infoService: HyperliquidInfoService,
     private readonly copinService: CopinInfoService,
     private readonly lark: LarkAlertService,
+    private readonly leaderboardMonitor: LeaderboardMonitorService,
   ) {}
 
   onModuleInit() {
@@ -416,6 +418,23 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
       // Fetch ledger first (key signal: deposit-to-trade gap)
       const ledger = await this.infoService.getUserNonFundingLedger(address);
+
+      // Phase 2a: Send-graph cluster detection — check if this wallet was funded by a known suspect
+      let linkedSuspectAddress: string | null = null;
+      for (const l of ledger) {
+        if (l.delta?.type === 'send' && l.delta?.user) {
+          const sender = (l.delta.user as string).toLowerCase();
+          if (sender !== address.toLowerCase() && this.suspects.has(sender)) {
+            linkedSuspectAddress = sender;
+            this.addLog(`[CLUSTER] ${address.slice(0, 12)}… funded by suspect ${sender.slice(0, 12)}…`);
+            break;
+          }
+        }
+      }
+
+      // Phase 2b: Leaderboard wallet detection
+      const isLeaderboardWallet = this.leaderboardMonitor.isLeaderboardWallet(address);
+
       await sleep(400);
       // Paginated all-time fills (up to 10k, aggregated by order)
       const allFills = await this.infoService.getUserFillsPaginated(address);
@@ -428,6 +447,25 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
       // Composite scoring A+B+C+D+E+G × F
       const scoring = this.scoreTrader(trade, ledger, allFills, state, copinClass);
+
+      // Phase 2a: Cluster hit — boost score by +10 and re-compute alert level
+      if (linkedSuspectAddress) {
+        scoring.extraFlags.push(InsiderFlag.LINKED_SUSPECT);
+        scoring.finalScore = Math.min(100, scoring.finalScore + 10);
+        scoring.alertLevel = scoring.finalScore >= 75 ? AlertLevel.CRITICAL
+          : scoring.finalScore >= 55 ? AlertLevel.HIGH
+          : scoring.finalScore >= 40 ? AlertLevel.MEDIUM
+          : scoring.finalScore >= 25 ? AlertLevel.LOW : AlertLevel.NONE;
+      }
+
+      // Phase 2b: Leaderboard wallet trading an unusual coin
+      if (isLeaderboardWallet) {
+        const knownCoins = this.leaderboardMonitor.getKnownCoins(address);
+        if (knownCoins.size >= 3 && !knownCoins.has(trade.coin)) {
+          scoring.extraFlags.push(InsiderFlag.LEADERBOARD_COIN);
+          this.lark.alertLeaderboardUnusualCoin(address, trade, [...knownCoins]).catch(() => null);
+        }
+      }
 
       // Merge extra flags into trade record
       for (const f of scoring.extraFlags) {
@@ -470,7 +508,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         fetchedAt: Date.now(),
       };
 
-      this.upsertSuspect(address, trade, profile, scoring, copinClass);
+      this.upsertSuspect(address, trade, profile, scoring, copinClass, { linkedSuspectAddress, isLeaderboardWallet });
     } catch (e) {
       this.logger.error(`inspectTrader(${address}): ${(e as Error).message}`);
     }
@@ -732,6 +770,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     profile: TraderProfile,
     scoring: InsiderScore,
     copinClass?: CopinProfile,
+    meta?: { linkedSuspectAddress: string | null; isLeaderboardWallet: boolean },
   ) {
     const existing = this.suspects.get(address);
 
@@ -756,6 +795,12 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       if (copinClass && copinClass.archetype !== 'UNKNOWN') {
         existing.copinProfile = copinClass;
       }
+      if (meta?.linkedSuspectAddress) {
+        existing.linkedSuspectAddress = meta.linkedSuspectAddress;
+      }
+      if (meta?.isLeaderboardWallet !== undefined) {
+        existing.isLeaderboardWallet = meta.isLeaderboardWallet;
+      }
     } else {
       const newSuspect: SuspectEntry = {
         address,
@@ -771,6 +816,8 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         walletType: scoring.walletType,
         depositToTradeGapMs: scoring.depositToTradeGapMs,
         copinProfile: (copinClass?.archetype !== 'UNKNOWN' ? copinClass : null) ?? null,
+        linkedSuspectAddress: meta?.linkedSuspectAddress ?? null,
+        isLeaderboardWallet: meta?.isLeaderboardWallet ?? false,
       };
       this.suspects.set(address, newSuspect);
       this.scanner.stats.suspectsFound = this.suspects.size;
@@ -782,6 +829,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       );
       this.lark.alertSuspect(newSuspect, trade).catch(() => null);
     }
+
+    // Record coin in leaderboard fingerprint (no-op if not a leaderboard wallet)
+    this.leaderboardMonitor.recordTradedCoin(address, trade.coin);
 
     this.scanner.stats.suspectsFound = this.suspects.size;
     this.scanner.stats.queueLength   = this.rateLimiter.queueLength;

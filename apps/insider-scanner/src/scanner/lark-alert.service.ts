@@ -1,7 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { lastValueFrom, catchError, of } from 'rxjs';
-import { larkWebhookUrl, larkAlertCooldownMs } from '../configs';
+import { larkWebhookUrl, larkAlertCooldownMs, leaderboardAlertEnabled } from '../configs';
 import { AlertLevel, InsiderFlag, LargeTrade, SuspectEntry } from './dto/trade.dto';
 
 /** Lark webhook rate limit: 5 req/s. Queue with 300ms gap to stay safe. */
@@ -47,6 +47,73 @@ export class LarkAlertService {
     this.cooldowns.set(key, Date.now());
 
     this.enqueue(this.buildMegaCard(trade));
+  }
+
+  /**
+   * Alert when a leaderboard wallet trades a coin outside its known fingerprint.
+   * This can indicate a coordinated unusual position by a known top trader.
+   */
+  async alertLeaderboardUnusualCoin(address: string, trade: LargeTrade, knownCoins: string[]): Promise<void> {
+    if (!larkWebhookUrl || !leaderboardAlertEnabled) return;
+
+    const key = `lb_coin_${address}_${trade.coin}`;
+    if (this.cooldowns.has(key)) return;
+    this.cooldowns.set(key, Date.now());
+
+    const copinUrl = `${COPIN_BASE}/${address}/hyperliquid`;
+    const fillNote = trade.fillCount > 1 ? ` (${trade.fillCount} fills)` : '';
+
+    this.enqueue({
+      msg_type: 'interactive',
+      card: {
+        config: { wide_screen_mode: true },
+        header: {
+          title: { content: '📋 LEADERBOARD WALLET — UNUSUAL COIN', tag: 'plain_text' },
+          template: 'yellow',
+        },
+        elements: [
+          {
+            tag: 'div',
+            text: { tag: 'lark_md', content: `**Wallet**\n\`${address}\`` },
+          },
+          {
+            tag: 'div',
+            fields: [
+              field('Coin', trade.coin),
+              field('Side + Size', `${trade.side} ${fmtUsd(trade.usdSize)}${fillNote} @ ${fmtPrice(trade.price)}`),
+            ],
+          },
+          {
+            tag: 'div',
+            fields: [
+              field('Normal Coins', knownCoins.slice(0, 8).join(', ') || '—'),
+              field('Time', utcTime(trade.time)),
+            ],
+          },
+          { tag: 'hr' },
+          {
+            tag: 'action',
+            actions: [
+              {
+                tag: 'button',
+                text: { content: '🔗 View on Copin', tag: 'plain_text' },
+                type: 'primary',
+                url: copinUrl,
+              },
+            ],
+          },
+          {
+            tag: 'note',
+            elements: [
+              {
+                tag: 'plain_text',
+                content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}`,
+              },
+            ],
+          },
+        ],
+      },
+    });
   }
 
   // ─── Card builders ────────────────────────────────────────────────────────────
@@ -138,6 +205,28 @@ export class LarkAlertService {
               field('Last Seen', utcTime(suspect.lastSeenAt)),
             ],
           },
+          // Copin archetype section
+          ...(suspect.copinProfile && suspect.copinProfile.archetype !== 'UNKNOWN' ? [
+            {
+              tag: 'div',
+              fields: [
+                field('Copin Type', `${archetypeEmoji(suspect.copinProfile.archetype)} ${suspect.copinProfile.archetype}`),
+                field('Copin Signals', suspect.copinProfile.signals.join(' · ') || '—'),
+              ],
+            },
+            ...(suspect.copinProfile.d30 ? [{
+              tag: 'div',
+              fields: [
+                field('D30 WinRate', `${suspect.copinProfile.d30.winRate.toFixed(0)}%  /  ${suspect.copinProfile.d30.totalTrade} trades`),
+                field('D30 PnL', `$${(suspect.copinProfile.d30.realisedPnl / 1000).toFixed(1)}k  avg hold ${fmtDuration(suspect.copinProfile.d30.avgDuration)}`),
+              ],
+            }] : []),
+          ] : []),
+          // Cluster hit section
+          ...(suspect.linkedSuspectAddress ? [{
+            tag: 'div',
+            text: { tag: 'lark_md', content: `**🔗 Cluster Hit**\nFunded by known suspect \`${suspect.linkedSuspectAddress}\`` },
+          }] : []),
           { tag: 'hr' },
           // Copin link button
           {
@@ -301,18 +390,20 @@ function field(label: string, value: string): object {
 
 function flagLabel(f: InsiderFlag): string {
   switch (f) {
-    case InsiderFlag.MEGA_TRADE:    return '⚡ MEGA';
-    case InsiderFlag.FIRST_TIMER:   return '★ FIRST TRADE';
-    case InsiderFlag.NEW_ACCOUNT:   return '◆ NEW ACCOUNT';
-    case InsiderFlag.LARGE_TRADE:   return 'LARGE';
-    case InsiderFlag.FRESH_DEPOSIT: return '⏱ FRESH DEP';
-    case InsiderFlag.DEPOSIT_ONLY:  return '🏦 DEP ONLY';
-    case InsiderFlag.GHOST_WALLET:  return '👻 GHOST';
-    case InsiderFlag.ONE_SHOT:      return '🎯 ONE SHOT';
-    case InsiderFlag.ALL_IN:        return '📈 ALL IN';
-    case InsiderFlag.HIGH_LEVERAGE: return '⚠ HIGH LEV';
-    case InsiderFlag.DEAD_MARKET:   return '💀 DEAD MKT';
-    case InsiderFlag.HIGH_OI_RATIO: return '📊 HIGH OI';
+    case InsiderFlag.MEGA_TRADE:      return '⚡ MEGA';
+    case InsiderFlag.FIRST_TIMER:     return '★ FIRST TRADE';
+    case InsiderFlag.NEW_ACCOUNT:     return '◆ NEW ACCOUNT';
+    case InsiderFlag.LARGE_TRADE:     return 'LARGE';
+    case InsiderFlag.FRESH_DEPOSIT:   return '⏱ FRESH DEP';
+    case InsiderFlag.DEPOSIT_ONLY:    return '🏦 DEP ONLY';
+    case InsiderFlag.GHOST_WALLET:    return '👻 GHOST';
+    case InsiderFlag.ONE_SHOT:        return '🎯 ONE SHOT';
+    case InsiderFlag.ALL_IN:          return '📈 ALL IN';
+    case InsiderFlag.HIGH_LEVERAGE:   return '⚠ HIGH LEV';
+    case InsiderFlag.DEAD_MARKET:     return '💀 DEAD MKT';
+    case InsiderFlag.HIGH_OI_RATIO:   return '📊 HIGH OI';
+    case InsiderFlag.LINKED_SUSPECT:  return '🔗 LINKED';
+    case InsiderFlag.LEADERBOARD_COIN: return '📋 LB_COIN';
     default: return f;
   }
 }
@@ -338,4 +429,21 @@ function fmtPrice(n: number): string {
   if (n >= 1) return `$${n.toFixed(3)}`;
   if (n >= 0.0001) return `$${n.toFixed(6)}`;
   return `$${n.toExponential(3)}`;
+}
+
+function archetypeEmoji(arch: string): string {
+  switch (arch) {
+    case 'ALGO_HFT':        return '🤖';
+    case 'SMART_TRADER':    return '🧠';
+    case 'DEGEN':           return '💀';
+    case 'INSIDER_SUSPECT': return '🎯';
+    case 'NORMAL':          return '📊';
+    default:                return '❓';
+  }
+}
+
+function fmtDuration(seconds: number): string {
+  if (seconds < 3_600)  return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86_400) return `${(seconds / 3_600).toFixed(1)}h`;
+  return `${(seconds / 86_400).toFixed(1)}d`;
 }

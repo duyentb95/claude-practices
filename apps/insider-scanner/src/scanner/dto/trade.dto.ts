@@ -29,6 +29,10 @@ export enum InsiderFlag {
   // Copin-derived flags (v3.0)
   COPIN_SUSPICIOUS = 'COPIN_SUSP',  // Copin: high win rate + few trades + short hold → insider pattern
   SMART_TRADER     = 'SMART',       // Copin: established profitable trader (FP signal)
+
+  // Phase 2 cluster + leaderboard flags
+  LINKED_SUSPECT   = 'LINKED',      // Depositor/controller is already a known suspect
+  LEADERBOARD_COIN = 'LB_COIN',     // Leaderboard wallet trading an unusual coin
 }
 
 export enum AlertLevel {
@@ -138,6 +142,10 @@ export interface SuspectEntry {
 
   // Copin behavioral classification (v3.0, may be null if Copin disabled/unavailable)
   copinProfile: CopinProfile | null;
+
+  // Phase 2: cluster + leaderboard fields
+  linkedSuspectAddress: string | null;   // send-graph cluster hit: address that funded this wallet
+  isLeaderboardWallet: boolean;          // true if wallet appears in top-100 Copin leaderboard
 }
 
 /** WebSocket connection stats */

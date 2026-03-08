@@ -69,3 +69,14 @@ export const copinRateLimitMs = parseInt(process.env.COPIN_RATE_LIMIT_MS || '200
 export const copinWhitelistRefreshMs = parseInt(
   process.env.COPIN_WHITELIST_REFRESH_MS || String(6 * 60 * 60 * 1000),
 );
+
+// ─── Leaderboard Monitor ───────────────────────────────────────────────────────
+
+// How often to refresh the top-trader leaderboard (default 6h)
+export const leaderboardRefreshMs = parseInt(
+  process.env.LEADERBOARD_REFRESH_MS || String(6 * 60 * 60 * 1000),
+);
+// Number of top traders to track in the leaderboard (default 100)
+export const leaderboardSize = parseInt(process.env.LEADERBOARD_SIZE || '100');
+// Whether to fire Lark alerts when a leaderboard wallet trades an unusual coin
+export const leaderboardAlertEnabled = process.env.LEADERBOARD_ALERT_ENABLED !== 'false';
