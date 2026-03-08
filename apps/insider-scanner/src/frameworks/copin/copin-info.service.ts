@@ -119,7 +119,6 @@ export class CopinInfoService implements OnModuleInit {
           pagination: { limit, offset: 0 },
           queries:    [{ fieldName: 'type', value: 'D30' }],
           ranges: [
-            { fieldName: 'realisedPnl', gte: 0 },
             { fieldName: 'totalTrade',  gte: 5 },
             { fieldName: 'runTimeDays', gte: 7 },
           ],
@@ -128,9 +127,14 @@ export class CopinInfoService implements OnModuleInit {
         }),
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) return [];
+      if (!res.ok) {
+        this.logger.warn(`Copin leaderboard HTTP ${res.status} ${res.statusText}`);
+        return [];
+      }
       const data = await res.json();
-      return this.extractAddresses(data);
+      const addrs = this.extractAddresses(data);
+      this.logger.log(`Copin leaderboard: ${addrs.length} addresses (total=${data?.total ?? '?'})`);
+      return addrs;
     } catch (e) {
       this.logger.warn(`Copin leaderboard fetch failed: ${(e as Error).message}`);
       return [];
