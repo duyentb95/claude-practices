@@ -112,28 +112,18 @@ export class CopinInfoService implements OnModuleInit {
     if (!copinEnabled) return [];
     await this.rateLimit();
     try {
-      const res = await fetch(`${copinApiUrl}/public/${PROTOCOL}/position/statistic/filter`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-KEY': copinApiKey },
-        body: JSON.stringify({
-          pagination: { limit, offset: 0 },
-          queries:    [{ fieldName: 'type', value: 'D30' }],
+      const data = await this.postFilter(
+        {
           ranges: [
             { fieldName: 'totalTrade',  gte: 5 },
             { fieldName: 'runTimeDays', gte: 7 },
           ],
-          sortBy:   'realisedPnl',
-          sortType: 'desc',
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) {
-        this.logger.warn(`Copin leaderboard HTTP ${res.status} ${res.statusText}`);
-        return [];
-      }
-      const data = await res.json();
+          sortBy: 'realisedPnl',
+        },
+        limit,
+      );
       const addrs = this.extractAddresses(data);
-      this.logger.log(`Copin leaderboard: ${addrs.length} addresses (total=${data?.total ?? '?'})`);
+      this.logger.log(`[Leaderboard] Copin returned ${addrs.length} addresses (total=${data?.total ?? '?'})`);
       return addrs;
     } catch (e) {
       this.logger.warn(`Copin leaderboard fetch failed: ${(e as Error).message}`);
@@ -215,12 +205,12 @@ export class CopinInfoService implements OnModuleInit {
   private async postFilter(opts: {
     ranges: { fieldName: string; gte?: number; lte?: number }[];
     sortBy: string;
-  }): Promise<any> {
+  }, limit = 200): Promise<any> {
     const res = await fetch(`${copinApiUrl}/public/${PROTOCOL}/position/statistic/filter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': copinApiKey },
       body: JSON.stringify({
-        pagination: { limit: 200, offset: 0 },
+        pagination: { limit, offset: 0 },
         queries:    [{ fieldName: 'type', value: 'D30' }],
         ranges:     opts.ranges,
         sortBy:     opts.sortBy,
@@ -228,7 +218,10 @@ export class CopinInfoService implements OnModuleInit {
       }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      this.logger.warn(`Copin filter HTTP ${res.status} (sortBy=${opts.sortBy})`);
+      return null;
+    }
     return res.json();
   }
 
