@@ -16,8 +16,19 @@ Current mid prices for all coins.
 // Response: { "BTC": "95230.5", "ETH": "3420.1", ... }
 ```
 
+### `allPerpMetas` ⭐ preferred for coin lists
+All perpetuals metadata **including HIP-3 pairs**. Use this when you only need coin names/metadata.
+```json
+// Request
+{ "type": "allPerpMetas" }
+// Response: [{ name, szDecimals, maxLeverage, onlyIsolated?, isDelisted? }, ...]
+// isDelisted: true → pair removed from trading; filter before subscribing
+// Includes HIP-3 DEX pairs not returned by metaAndAssetCtxs
+```
+**Always filter `isDelisted: true` before subscribing to WebSocket trades.**
+
 ### `metaAndAssetCtxs`
-All perpetuals metadata + live market context. **Most important market call.**
+All perpetuals metadata + live market context. Use when you need market context (OI, funding, volume) alongside metadata.
 ```json
 // Request
 { "type": "metaAndAssetCtxs" }
@@ -25,7 +36,7 @@ All perpetuals metadata + live market context. **Most important market call.**
 // meta.universe[i]: { name, szDecimals, maxLeverage }
 // ctxArray[i]: { funding, openInterest, prevDayPx, dayNtlVlm, markPx, midPx, premium, oiNtlVlm }
 ```
-Coin `i` is shared between `meta.universe` and `ctxArray`.
+Coin `i` is shared between `meta.universe` and `ctxArray`. Does NOT include HIP-3 pairs.
 
 ### `l2Book`
 Order book snapshot.

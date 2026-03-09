@@ -4,6 +4,35 @@ All notable changes to this skill. Format: [semver] - YYYY-MM-DD
 
 ---
 
+## [3.1.0] - 2026-03-09
+
+### Added
+- **HIP-3 WebSocket coverage**: `WsScannerService` now subscribes to `{ type: 'trades', dex: 'ALL_DEXS' }` in addition to per-coin subscriptions, receiving trades for all HIP-3 DEX pairs.
+- **`allPerpMetas` coin loading**: `loadCoins()` migrated from `getMetaAndAssetCtxs()` to `getAllPerpMetas()`, which includes HIP-3 pairs and filters out delisted pairs (`isDelisted: true`).
+- **`getAllPerpMetas()` in HyperliquidInfoService**: new method using `{ type: 'allPerpMetas' }` POST /info. Filters `isDelisted: true` by default.
+- **`isDelisted` field** on `PerpMetaDto` interface.
+
+---
+
+## [3.0.0] - 2026-03-09
+
+### Added
+- **Phase 2: LeaderboardMonitorService** — pre-warms Copin classification cache for top-100 traders every 6h; detects when leaderboard wallets trade unusual coins (LEADERBOARD_COIN flag, yellow Lark alert).
+- **Send-graph cluster detection** — wallets funded by known suspects receive LINKED_SUSPECT flag (+10 score boost). Uses `send`-type ledger entries to trace funding chain.
+- **Copin archetype section** in Lark suspect cards: shows D30 win rate, PnL, avg hold time, archetype label with emoji.
+- **Cluster hit section** in Lark suspect cards: shows funding address when LINKED_SUSPECT detected.
+- **`alertLeaderboardUnusualCoin()`** — new Lark alert for leaderboard wallet trading an unusual coin (yellow card, 4h cooldown).
+- **InsiderFlag.LINKED_SUSPECT ('LINKED')** and **InsiderFlag.LEADERBOARD_COIN ('LB_COIN')** added to enum.
+- **`linkedSuspectAddress`** and **`isLeaderboardWallet`** fields on `SuspectEntry`.
+- **Leaderboard stats** exposed in `GET /api/state` response (`leaderboard.size`, `lastRefreshedAt`, `preWarmCount`).
+- **`archetypeEmoji()`** and **`fmtDuration()`** helpers in `lark-alert.service.ts`.
+- **`leaderboardRefreshMs`**, **`leaderboardSize`**, **`leaderboardAlertEnabled`** config env vars.
+
+### Notes
+- Leaderboard pre-warm is pending until Copin filter API completes DB migration (API returns empty for all queries as of 2026-03-09). 5-min startup retry already in place.
+
+---
+
 ## [2.1.0] - 2026-03-05
 
 ### Added

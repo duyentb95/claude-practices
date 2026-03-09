@@ -73,10 +73,10 @@ export class WsScannerService implements OnModuleInit, OnModuleDestroy {
 
   private async loadCoins() {
     try {
-      const [metas] = await this.infoService.getMetaAndAssetCtxs();
+      const metas = await this.infoService.getAllPerpMetas();  // includes HIP-3, excludes delisted
       this.coins = metas.map((m) => m.name).filter(Boolean);
       this.stats.subscribedCoins = this.coins.length;
-      this.logger.log(`Loaded ${this.coins.length} coins from Hyperliquid`);
+      this.logger.warn(`Loaded ${this.coins.length} coins from Hyperliquid (allPerpMetas, HIP-3 included)`);
     } catch (e) {
       this.logger.error(`Failed to load coins: ${e.message}`);
     }
@@ -97,7 +97,15 @@ export class WsScannerService implements OnModuleInit, OnModuleDestroy {
         `WS connected – subscribing to ${this.coins.length} trades channels`,
       );
 
-      // Subscribe to trades for every perp coin.
+      // Subscribe to HIP-3 trades (dex: 'ALL_DEXS' catches all DEX pairs).
+      this.socket!.send(
+        JSON.stringify({
+          method: 'subscribe',
+          subscription: { type: 'trades', dex: 'ALL_DEXS' },
+        }),
+      );
+
+      // Subscribe to trades for every standard perp coin.
       // Each sub = 1 of 1000 allowed subscriptions per connection.
       for (const coin of this.coins) {
         this.socket!.send(

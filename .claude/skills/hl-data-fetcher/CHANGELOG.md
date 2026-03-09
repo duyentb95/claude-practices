@@ -2,6 +2,17 @@
 
 ---
 
+## [1.1.0] - 2026-03-09
+
+### Added
+- **`allPerpMetas` endpoint**: new API type that returns all perpetuals metadata including HIP-3 DEX pairs. Replaces `metaAndAssetCtxs` when only coin metadata is needed.
+- **`isDelisted` field** on `PerpMetaDto`: pairs with `isDelisted: true` should be filtered before subscribing to WebSocket trades.
+- **`dex: 'ALL_DEXS'` WebSocket subscription**: single subscription that receives trades for all HIP-3 DEX pairs. Add alongside per-coin subscriptions for full coverage.
+- Updated `info-endpoint.md`: `allPerpMetas` documented as preferred for coin lists; `metaAndAssetCtxs` noted as not including HIP-3 pairs.
+- Updated `websocket.md`: HIP-3 coverage pattern documented (allPerpMetas + dex:ALL_DEXS).
+
+---
+
 ## [1.0.0] - 2026-03-05
 
 ### Added

@@ -111,7 +111,8 @@ Read-only analytics platform for Hyperliquid trader data.
 Base: `https://api.hyperliquid.xyz` — All info requests: `POST /info`
 
 ```typescript
-{"type": "metaAndAssetCtxs"}                           // All tokens metadata + market context
+{"type": "allPerpMetas"}                               // All perp metadata incl. HIP-3; isDelisted field
+{"type": "metaAndAssetCtxs"}                           // Standard perps metadata + market context (no HIP-3)
 {"type": "userFills", "user": "0x..."}                  // Trade history
 {"type": "userFillsByTime", "user": "0x...", "startTime": ms, "endTime": ms}
 {"type": "clearinghouseState", "user": "0x..."}         // Positions + margin
@@ -120,7 +121,19 @@ Base: `https://api.hyperliquid.xyz` — All info requests: `POST /info`
 {"type": "l2Book", "coin": "BTC"}                       // Orderbook snapshot
 ```
 
+**HIP-3 WebSocket**: Subscribe `{ type: 'trades', dex: 'ALL_DEXS' }` to receive all HIP-3 DEX pair trades (one subscription covers all). Always combine with per-coin subscriptions for complete coverage.
+
 Rate limit: ~1200 req/min. Use 1100ms sequential queue for REST calls.
+
+## Documentation Policy
+
+**IMPORTANT: Every code change must be accompanied by documentation updates:**
+1. **CHANGELOG.md** in the relevant skill directory (e.g., `.claude/skills/insider-detector/CHANGELOG.md`, `.claude/skills/hl-data-fetcher/CHANGELOG.md`)
+2. **Resource `.md` files** in the skill (e.g., `resources/hyperliquid-api.md`, `resources/websocket.md`, `resources/info-endpoint.md`) — update any endpoints, patterns, or behaviors that changed
+3. **CLAUDE.md** — update architecture notes, env vars, API reference if affected
+4. **Memory file** (`~/.claude/projects/.../memory/MEMORY.md`) — update if project structure or key patterns changed
+
+This applies to all features, bug fixes, and API changes.
 
 ## Deployment
 

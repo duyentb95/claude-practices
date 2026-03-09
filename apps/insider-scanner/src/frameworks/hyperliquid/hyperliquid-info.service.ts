@@ -9,6 +9,7 @@ export interface PerpMetaDto {
   szDecimals: number;
   maxLeverage: number;
   onlyIsolated?: boolean;
+  isDelisted?: boolean;   // true for pairs removed from trading (filter before subscribing)
 }
 
 export interface AssetCtxDto {
@@ -78,6 +79,18 @@ export class HyperliquidInfoService {
   private readonly DEFAULT_TIMEOUT = 15_000;
 
   constructor(private readonly httpService: HttpService) {}
+
+  /**
+   * Fetch all perpetuals metadata including HIP-3 pairs.
+   * Use this instead of getMetaAndAssetCtxs() when you only need coin names/metadata.
+   * Filters out delisted pairs (isDelisted: true) by default.
+   */
+  async getAllPerpMetas(includeDelisted = false): Promise<PerpMetaDto[]> {
+    const raw = await this.postInfo<any>({ type: 'allPerpMetas' }, null);
+    if (!raw) return [];
+    const universe: PerpMetaDto[] = Array.isArray(raw) ? raw : (raw?.universe ?? []);
+    return includeDelisted ? universe : universe.filter((m) => !m.isDelisted);
+  }
 
   /**
    * Fetch perpetuals metadata + live market context.

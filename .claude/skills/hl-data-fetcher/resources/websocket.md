@@ -46,7 +46,11 @@ function unsubscribe(subscription: object) {
 ### `trades` — Real-time trade feed
 
 ```typescript
+// Standard perp coin subscription
 subscribe({ type: 'trades', coin: 'BTC' });
+
+// HIP-3 DEX pairs — subscribe once to receive ALL DEX pair trades
+subscribe({ type: 'trades', dex: 'ALL_DEXS' });
 
 // Message format:
 {
@@ -66,6 +70,11 @@ subscribe({ type: 'trades', coin: 'BTC' });
 // Compute notional: parseFloat(px) * parseFloat(sz)
 // Track both sides: users[0] and users[1] for insider detection
 ```
+
+**HIP-3 coverage**: To monitor all pairs including HIP-3 DEX tokens:
+1. Use `{ type: 'allPerpMetas' }` to get coin list (includes HIP-3; filter `isDelisted: true`)
+2. Subscribe per-coin for standard perps: `{ type: 'trades', coin }`
+3. Add one `{ type: 'trades', dex: 'ALL_DEXS' }` subscription for all HIP-3 pairs
 
 ### `allMids` — Live mid prices (all coins)
 
