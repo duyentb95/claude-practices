@@ -1,6 +1,6 @@
 ---
 name: insider-detector
-version: 2.1.0
+version: 3.1.0
 description: >
   Detect insider trading patterns on Hyperliquid perpetuals.
   Trigger when asked to investigate a wallet, token, or suspicious large trade.
@@ -9,7 +9,7 @@ description: >
 complexity: 18/20
 architecture: Pipeline
 platforms: [claude-code]
-updated: 2026-03-05
+updated: 2026-03-09
 ---
 
 ## Goal
@@ -20,12 +20,15 @@ classify alert level, and generate a structured Markdown report.
 
 ## Core Capabilities
 
-- **Composite scoring** — A+B+C+D+E × F model (0–100) tuned to Hyperliquid data
-- **MM/HFT filter** — skips market makers via native `userFees` API (maker-rebate tier)
+- **Composite scoring** — (A+B+C+D+E) × F + G model (0–100) tuned to Hyperliquid data
+- **MM/HFT filter** — Layer 0/1/2: zero-address skip, `userFees` API maker-rebate check, Copin ALGO_HFT check
+- **Copin behavioral profiling** — component G (−10 to +10) based on 30-day Copin stats; archetypes: ALGO_HFT / SMART_TRADER / INSIDER_SUSPECT / DEGEN / NORMAL / UNKNOWN
 - **Send-type detection** — catches sub-account/controller funding via internal `send` entries
+- **Send-graph cluster detection** — wallets funded by known suspects get +10 score boost + LINKED flag
+- **Leaderboard monitoring** — tracks top-100 Copin traders; alerts when they trade unusual coins (LB_COIN flag)
+- **HIP-3 coverage** — subscribes to all DEX pair trades via `dex: 'ALL_DEXS'`; uses `allPerpMetas` for coin list
 - **Paginated fills** — up to 10 000 most recent aggregated orders per wallet
 - **All-time PnL signal** — profitable wallets score higher (informed trader indicator)
-- **Wallet clustering** — delegates to `wallet-clusterer` agent for correlated wallets
 
 ---
 
@@ -51,12 +54,22 @@ Rate limit: **1 100 ms between calls**. Use the `data-fetcher` agent for bulk co
 
 ```
 1. userFees                        → Layer 1: skip if userAddRate ≤ 0 (HFT/MM)
-2. userNonFundingLedgerUpdates     → deposit / send / withdraw history
-3. userFillsByTime (paginated)     → up to 10k orders, aggregateByTime: true
+2. CopinInfoService.getClassification() → Layer 2: skip if ALGO_HFT; get scoreG
+3. userNonFundingLedgerUpdates     → deposit / send / withdraw history + cluster check
+   └─ scan send entries: if sender ∈ suspects → LINKED flag, +10 score boost
+4. userFillsByTime (paginated)     → up to 10k orders, aggregateByTime: true
    └─ page = 2000 records, pause 300ms between pages, endTime = min(page.time)−1
-4. clearinghouseState              → margin summary + open positions
-5. metaAndAssetCtxs                → coin 24h volume + OI for scoreC context
+5. clearinghouseState              → margin summary + open positions
+6. metaAndAssetCtxs                → coin 24h volume + OI for scoreC context
 ```
+
+**Coin metadata (HIP-3 support):**
+
+Use `allPerpMetas` (not `metaAndAssetCtxs`) when only needing coin names.
+- Response: array of DEX objects → flatMap all `universe[]` arrays
+- Filter `isDelisted: true` before subscribing to WebSocket trades
+- Standard perps at index 0 (229 coins); HIP-3 DEX pairs at indices 1–7 (~74 coins)
+- WebSocket: subscribe `{ type: 'trades', dex: 'ALL_DEXS' }` for all HIP-3 pairs
 
 **Ledger field mapping by entry type:**
 
@@ -181,7 +194,26 @@ hasFreshWallet + hasDeadMarket            → +0.15
 hasImmediate + hasFreshWallet + hasAllIn  → +0.10  (triple combo)
 
 multiplier = min(1.5, 1.0 + bonuses)
-finalScore = min(100, round((A+B+C+D+E) × multiplier))
+baseScore = min(100, round((A+B+C+D+E) × multiplier))
+```
+
+#### [G] Copin Behavioral Score — −10 to +10
+
+```
+Fetch CopinInfoService.getClassification(address) → CopinProfile { archetype, scoreG, d30 }
+
+ALGO_HFT          → scoreG = −10 → hard skip (do not inspect further)
+INSIDER_SUSPECT   → scoreG = +10 (strong) or +5 (mild)
+SMART_TRADER      → scoreG = −8 (reduces FP; also raises smart-trader whitelist threshold to 55)
+DEGEN             → scoreG = −5
+NORMAL / UNKNOWN  → scoreG = 0
+
+finalScore = min(100, baseScore + scoreG)
+
+# Cluster boost (applied after G):
+if LINKED_SUSPECT flag:
+  finalScore = min(100, finalScore + 10)
+  recalculate alertLevel with boosted score
 ```
 
 ---
@@ -211,6 +243,10 @@ finalScore = min(100, round((A+B+C+D+E) × multiplier))
 
 **Flag bonuses** (used for suspect sorting, not score):
 `GHOST +15` · `ONE_SHOT +12` · `FRESH_DEP +10` · `FIRST +8` · `ALL_IN +6` · `MEGA +5` · `NEW_ACCT +4`
+
+**New flags (Phase 2):**
+- `LINKED` (`LINKED_SUSPECT`) — wallet funded by a known suspect; triggers +10 score boost
+- `LB_COIN` (`LEADERBOARD_COIN`) — leaderboard wallet trading a coin outside its known fingerprint
 
 ---
 
@@ -267,11 +303,15 @@ after depositing ${X.XM}. [One-sentence verdict.]
 
 1. **Layer 0**: Always skip `0x0000000000000000000000000000000000000000`
 2. **Layer 1**: Always check `userFees` first; skip if `userAddRate ≤ 0` (HFT cache 24h)
-3. **Rate limits**: 1 100 ms between REST calls; 300 ms between pagination pages
-4. **Minimum data**: require at least `ledger` + `clearinghouseState` to produce a score
-5. **scoreB floor**: −8 (never unbounded negative)
-6. **NONE = discard**: scores < 25 are never recorded or alerted
-7. **lossless-json**: mandatory for Hyperliquid API parsing (large integer precision)
-8. **Copin URL**: always `/HYPERLIQUID` uppercase
-9. **Address display**: `0xXXX…XXX` format (first 5 chars + last 3 chars)
-10. **Do not hardcode thresholds** — coin-tier thresholds come from live `metaAndAssetCtxs`
+3. **Layer 2**: Check Copin classification; skip if `ALGO_HFT` (scoreG = −10; cache 30 min)
+4. **Rate limits**: 1 100 ms between REST calls; 300 ms between pagination pages; 2 000 ms between Copin calls
+5. **Minimum data**: require at least `ledger` + `clearinghouseState` to produce a score
+6. **scoreB floor**: −8 (never unbounded negative)
+7. **NONE = discard**: scores < 25 are never recorded or alerted
+8. **lossless-json**: mandatory for Hyperliquid API parsing (large integer precision)
+9. **Copin URL**: always `/HYPERLIQUID` uppercase; Copin gracefully degrades (G = 0) if API key missing
+10. **Address display**: `0xXXX…XXX` format (first 5 chars + last 3 chars)
+11. **Do not hardcode thresholds** — coin-tier thresholds come from live `metaAndAssetCtxs`
+12. **allPerpMetas for coin lists** — use `allPerpMetas` (not `metaAndAssetCtxs`) for WebSocket coin loading; always filter `isDelisted: true`
+13. **HIP-3 subscription** — always include `{ type: 'trades', dex: 'ALL_DEXS' }` alongside per-coin subscriptions
+14. **Docs policy** — every code/logic change must update: CHANGELOG.md, resource .md files, README.md (English + Vietnamese), CLAUDE.md, memory file
