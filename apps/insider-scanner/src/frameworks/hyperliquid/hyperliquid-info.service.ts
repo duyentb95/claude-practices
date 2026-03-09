@@ -87,9 +87,10 @@ export class HyperliquidInfoService {
    */
   async getAllPerpMetas(includeDelisted = false): Promise<PerpMetaDto[]> {
     const raw = await this.postInfo<any>({ type: 'allPerpMetas' }, null);
-    if (!raw) return [];
-    const universe: PerpMetaDto[] = Array.isArray(raw) ? raw : (raw?.universe ?? []);
-    return includeDelisted ? universe : universe.filter((m) => !m.isDelisted);
+    if (!raw || !Array.isArray(raw)) return [];
+    // Response: array of DEX objects each with universe[] — flatten all DEXes into one list
+    const all: PerpMetaDto[] = raw.flatMap((dex: any) => dex?.universe ?? []);
+    return includeDelisted ? all : all.filter((m) => !m.isDelisted);
   }
 
   /**
