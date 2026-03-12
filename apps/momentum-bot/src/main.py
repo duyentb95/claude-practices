@@ -27,6 +27,7 @@ from src.strategy.models import (
     SignalDirection,
 )
 from src.utils.logger import get_logger, setup_logging
+from src.web.server import BotState, DashboardServer
 
 log = get_logger(__name__)
 
@@ -56,8 +57,15 @@ class MomentumBot:
         # Active positions tracked by the bot.
         self._positions: dict[str, ManagedPosition] = {}
 
+        # Closed position history + recent signals (for dashboard).
+        self._closed_positions: list[ManagedPosition] = []
+        self._signals: list[Signal] = []
+
         # Subscribed coins for candle data.
         self._subscribed_coins: set[str] = set()
+
+        # Dashboard web server.
+        self._dashboard: DashboardServer | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -83,6 +91,22 @@ class MomentumBot:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.stop()))
 
+        # Start the dashboard web server.
+        bot_state = BotState(
+            config=self.config,
+            dry_run=self.dry_run,
+            started_at=time.time(),
+            positions=self._positions,
+            closed_positions=self._closed_positions,
+            signals=self._signals,
+            subscribed_coins=self._subscribed_coins,
+            candle_store=self.candle_store,
+            update_config=self._apply_config_update,
+            emergency_close=self._emergency_close_all,
+        )
+        self._dashboard = DashboardServer(bot_state)
+        await self._dashboard.start()
+
         # Run the scanning and position management loops concurrently.
         try:
             async with asyncio.TaskGroup() as tg:
@@ -91,6 +115,8 @@ class MomentumBot:
         except* asyncio.CancelledError:
             log.info("bot_loops_cancelled")
         finally:
+            if self._dashboard:
+                await self._dashboard.stop()
             self._running = False
             log.info("bot_stopped")
 
@@ -192,11 +218,39 @@ class MomentumBot:
     # Signal handling
     # ------------------------------------------------------------------
 
+    async def _apply_config_update(self, updates: dict) -> None:
+        """Apply partial config update from the dashboard."""
+        for section, values in updates.items():
+            target = getattr(self.config, section, None)
+            if target is None:
+                continue
+            for key, val in values.items():
+                if hasattr(target, key):
+                    setattr(target, key, val)
+        log.info("config_updated_via_dashboard", sections=list(updates.keys()))
+
+    async def _emergency_close_all(self) -> None:
+        """Emergency close all positions (called from dashboard)."""
+        log.warning("emergency_close_triggered")
+        coins = list(self._positions.keys())
+        for coin in coins:
+            pos = self._positions[coin]
+            latest = self.candle_store.get_latest(coin)
+            price = latest.close if latest else pos.entry_price
+            await self._close_position(pos, price, "MANUAL")
+        for coin in coins:
+            self._positions.pop(coin, None)
+
     async def on_signal(self, signal_obj: Signal) -> None:
         """Handle a new trading signal.
 
         In dry-run mode the signal is logged but no orders are placed.
         """
+        # Track signal for dashboard (cap at 100).
+        self._signals.append(signal_obj)
+        if len(self._signals) > 100:
+            self._signals.pop(0)
+
         log.info(
             "signal_generated",
             coin=signal_obj.coin,
@@ -349,6 +403,9 @@ class MomentumBot:
         pos.pnl = pnl
         if pos.notional_usd > 0:
             pos.pnl_pct = pnl / pos.notional_usd * 100
+
+        # Track in closed history for dashboard.
+        self._closed_positions.append(pos)
 
         log.info(
             "position_closed",
