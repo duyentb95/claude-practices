@@ -1,8 +1,15 @@
 import { Controller, Get, Header } from '@nestjs/common';
+import { getAddress } from 'ethers';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
 import { LeaderboardMonitorService } from '../scanner/leaderboard-monitor.service';
 import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
+
+/** EIP-55 checksum address for Copin URL compatibility. */
+function toChecksum(addr: string): string {
+  try { return getAddress(addr); }
+  catch { return addr; }
+}
 
 // ─── Embedded HTML dashboard ──────────────────────────────────────────────────
 
@@ -423,7 +430,7 @@ function renderTradeRows(slice){
       ? '<span class="cy f10">'+t.fillCount+'f</span>'
       : '<span class="cd f10">1f</span>';
 
-    var takerUrl = t.takerAddress ? 'https://app.copin.io/trader/'+encodeURIComponent(t.takerAddress)+'/HYPERLIQUID' : '';
+    var takerUrl = t.takerChecksumAddress ? 'https://app.copin.io/trader/'+encodeURIComponent(t.takerChecksumAddress)+'/HYPERLIQUID' : '';
     var taker = t.takerAddress
       ? '<span class="addr cb" title="'+esc(t.takerAddress)+'">'+esc(shortAddr(t.takerAddress))+'</span>'
         +' <a href="'+takerUrl+'" target="_blank" rel="noopener" class="copin">↗</a>'
@@ -511,7 +518,7 @@ function renderSuspectRows(slice){
     var coins = (s.coins||[]).slice(0,6).join(', ');
     if((s.coins||[]).length > 6) coins += '…';
 
-    var url = 'https://app.copin.io/trader/'+encodeURIComponent(s.address)+'/HYPERLIQUID';
+    var url = 'https://app.copin.io/trader/'+encodeURIComponent(s.checksumAddress||s.address)+'/HYPERLIQUID';
 
     h += '<tr'+cls+'>'
       + '<td><span class="addr '+ac+'" title="'+esc(s.address)+'">'+esc(shortAddr(s.address))+'</span>'
@@ -660,9 +667,13 @@ export class AppController {
   getState() {
     return {
       stats: this.scanner.stats,
-      trades: this.detector.largeTrades,
+      trades: this.detector.largeTrades.map((t) => ({
+        ...t,
+        takerChecksumAddress: t.takerAddress ? toChecksum(t.takerAddress) : null,
+      })),
       suspects: this.detector.getSuspectsSorted().map((s) => ({
         address: s.address,
+        checksumAddress: toChecksum(s.address),
         totalUsd: s.totalUsd,
         tradeCount: s.tradeCount,
         coins: [...s.coins],

@@ -1,5 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
+import { getAddress } from 'ethers';
 import { lastValueFrom, catchError, of } from 'rxjs';
 import { larkWebhookUrl, larkAlertCooldownMs, leaderboardAlertEnabled, fpDigestEnabled } from '../configs';
 import { AlertLevel, InsiderFlag, LargeTrade, SuspectEntry } from './dto/trade.dto';
@@ -8,6 +9,12 @@ import { AlertLevel, InsiderFlag, LargeTrade, SuspectEntry } from './dto/trade.d
 const LARK_SEND_GAP_MS = 300;
 
 const COPIN_BASE = 'https://app.copin.io/trader';
+
+/** Convert hex address to EIP-55 checksum for Copin URLs. */
+function toChecksum(addr: string): string {
+  try { return getAddress(addr); }
+  catch { return addr; }
+}
 
 @Injectable()
 export class LarkAlertService {
@@ -60,7 +67,7 @@ export class LarkAlertService {
     if (this.cooldowns.has(key)) return;
     this.cooldowns.set(key, Date.now());
 
-    const copinUrl = `${COPIN_BASE}/${address}/hyperliquid`;
+    const copinUrl = `${COPIN_BASE}/${toChecksum(address)}/hyperliquid`;
     const fillNote = trade.fillCount > 1 ? ` (${trade.fillCount} fills)` : '';
 
     this.enqueue({
@@ -182,7 +189,7 @@ export class LarkAlertService {
     const flags = [...suspect.flags].map(flagLabel).join('  ');
     const fills = suspect.profile == null ? '?' : String(suspect.profile.fillCount90d);
     const acctVal = suspect.profile == null ? '?' : fmtUsd(suspect.profile.accountValue);
-    const copinUrl = `${COPIN_BASE}/${suspect.address}/hyperliquid`;
+    const copinUrl = `${COPIN_BASE}/${toChecksum(suspect.address)}/hyperliquid`;
     const fillNote = trigger.fillCount > 1 ? ` (${trigger.fillCount} fills)` : '';
     const depositGap = suspect.depositToTradeGapMs != null
       ? fmtGap(suspect.depositToTradeGapMs)
@@ -297,7 +304,7 @@ export class LarkAlertService {
 
   private buildMegaCard(trade: LargeTrade): object {
     const copinUrl = trade.takerAddress
-      ? `${COPIN_BASE}/${trade.takerAddress}/hyperliquid`
+      ? `${COPIN_BASE}/${toChecksum(trade.takerAddress)}/hyperliquid`
       : null;
     const fillNote = trade.fillCount > 1 ? ` (${trade.fillCount} fills)` : '';
 

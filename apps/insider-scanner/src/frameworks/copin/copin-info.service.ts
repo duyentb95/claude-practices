@@ -1,6 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { getAddress } from 'ethers';
 import { copinApiKey, copinApiUrl, copinEnabled, copinRateLimitMs } from '../../configs';
 import type { CopinProfile } from '../../scanner/dto/trade.dto';
+
+/** Convert a hex address to EIP-55 checksum format for Copin API compatibility. */
+function toChecksumAddress(address: string): string {
+  try { return getAddress(address); }
+  catch { return address; }
+}
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -170,8 +177,9 @@ export class CopinInfoService implements OnModuleInit {
 
   private async fetchD30(address: string): Promise<CopinD30 | null> {
     try {
+      const checksumAddr = toChecksumAddress(address);
       const res = await fetch(
-        `${copinApiUrl}/${PROTOCOL}/position-statistic/${address}`,
+        `${copinApiUrl}/${PROTOCOL}/position-statistic/${checksumAddr}`,
         {
           headers: { 'Content-Type': 'application/json', 'X-API-KEY': copinApiKey },
           signal: AbortSignal.timeout(5_000),
