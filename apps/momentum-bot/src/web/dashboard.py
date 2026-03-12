@@ -555,120 +555,9 @@ tr:hover td { background:var(--bg-hover); }
   <!-- ===== CONFIG TAB ===== -->
   <section class="tab-panel" id="panel-config">
     <form id="config-form" onsubmit="return saveConfig(event)">
-      <div class="config-grid">
-
-        <!-- Risk Settings -->
-        <div class="config-section">
-          <h3>Risk Settings</h3>
-          <div class="config-field">
-            <label for="cfg-max_risk_per_trade_pct">max_risk_per_trade_pct</label>
-            <input type="number" step="0.01" id="cfg-max_risk_per_trade_pct" name="max_risk_per_trade_pct"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-max_leverage">max_leverage</label>
-            <input type="number" step="1" id="cfg-max_leverage" name="max_leverage"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-max_concurrent_positions">max_concurrent_positions</label>
-            <input type="number" step="1" id="cfg-max_concurrent_positions" name="max_concurrent_positions"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-daily_loss_limit_pct">daily_loss_limit_pct</label>
-            <input type="number" step="0.1" id="cfg-daily_loss_limit_pct" name="daily_loss_limit_pct"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-max_drawdown_pct">max_drawdown_pct</label>
-            <input type="number" step="0.1" id="cfg-max_drawdown_pct" name="max_drawdown_pct"/>
-          </div>
-        </div>
-
-        <!-- Strategy Settings -->
-        <div class="config-section">
-          <h3>Strategy Settings</h3>
-          <div class="config-field">
-            <label for="cfg-regime_lookback_minutes">regime_lookback_minutes</label>
-            <input type="number" step="1" id="cfg-regime_lookback_minutes" name="regime_lookback_minutes"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-min_volume_per_minute_usd">min_volume_per_minute_usd</label>
-            <input type="number" step="100" id="cfg-min_volume_per_minute_usd" name="min_volume_per_minute_usd"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-limit_order_threshold_pct">limit_order_threshold_pct</label>
-            <input type="number" step="0.01" id="cfg-limit_order_threshold_pct" name="limit_order_threshold_pct"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-stale_position_timeout_minutes">stale_position_timeout_min</label>
-            <input type="number" step="1" id="cfg-stale_position_timeout_minutes" name="stale_position_timeout_minutes"/>
-          </div>
-        </div>
-
-        <!-- Staircase Settings -->
-        <div class="config-section">
-          <h3>Staircase Settings</h3>
-          <div class="config-field">
-            <label for="cfg-min_lookback_candles">min_lookback_candles</label>
-            <input type="number" step="1" id="cfg-min_lookback_candles" name="min_lookback_candles"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-pullback_ratio_threshold">pullback_ratio_threshold</label>
-            <input type="number" step="0.01" id="cfg-pullback_ratio_threshold" name="pullback_ratio_threshold"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-slope_consistency_threshold">slope_consistency_threshold</label>
-            <input type="number" step="0.01" id="cfg-slope_consistency_threshold" name="slope_consistency_threshold"/>
-          </div>
-        </div>
-
-        <!-- Volume Settings -->
-        <div class="config-section">
-          <h3>Volume Settings</h3>
-          <div class="config-field">
-            <label for="cfg-increase_threshold_pct">increase_threshold_pct</label>
-            <input type="number" step="1" id="cfg-increase_threshold_pct" name="increase_threshold_pct"/>
-          </div>
-        </div>
-
-        <!-- Scanner Settings -->
-        <div class="config-section">
-          <h3>Scanner Settings</h3>
-          <div class="config-field">
-            <label for="cfg-scan_interval_seconds">scan_interval_seconds</label>
-            <input type="number" step="1" id="cfg-scan_interval_seconds" name="scan_interval_seconds"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-top_n_candidates">top_n_candidates</label>
-            <input type="number" step="1" id="cfg-top_n_candidates" name="top_n_candidates"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-min_24h_volume_usd">min_24h_volume_usd</label>
-            <input type="number" step="1000" id="cfg-min_24h_volume_usd" name="min_24h_volume_usd"/>
-          </div>
-        </div>
-
-        <!-- Target Settings -->
-        <div class="config-section">
-          <h3>Target Settings</h3>
-          <div class="config-field">
-            <label for="cfg-default_rr">default_rr</label>
-            <input type="number" step="0.1" id="cfg-default_rr" name="default_rr"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-strong_regime_rr">strong_regime_rr</label>
-            <input type="number" step="0.1" id="cfg-strong_regime_rr" name="strong_regime_rr"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-trailing_trigger_r">trailing_trigger_r</label>
-            <input type="number" step="0.1" id="cfg-trailing_trigger_r" name="trailing_trigger_r"/>
-          </div>
-          <div class="config-field">
-            <label for="cfg-trailing_lock_r">trailing_lock_r</label>
-            <input type="number" step="0.1" id="cfg-trailing_lock_r" name="trailing_lock_r"/>
-          </div>
-        </div>
-
+      <div class="config-grid" id="config-grid">
+        <!-- Dynamically generated from /api/config -->
       </div>
-
       <div style="margin-top:20px; display:flex; align-items:center;">
         <button type="submit" class="btn-save" id="btn-save">Save Configuration</button>
         <span class="save-feedback" id="save-feedback"></span>
@@ -1118,14 +1007,87 @@ document.querySelectorAll('.log-filter-btn').forEach(function(btn) {
 });
 
 /* ===== CONFIG ===== */
+/* Sections that are editable (top-level keys from config) */
+var CONFIG_SECTIONS = ['account','risk','strategy','scanner','alerts'];
+/* Sub-sections nested inside strategy */
+var STRATEGY_SUBS = ['staircase','volume','volatility','targets'];
+/* Hidden fields (secrets, non-editable) */
+var CONFIG_HIDDEN = ['hl_private_key','hl_account_address','hl_testnet',
+  'risk_per_trade_pct','max_leverage','max_concurrent_positions',
+  'max_daily_loss_pct','lark_webhook_url','telegram_bot_token',
+  'telegram_chat_id','redis_url','model_config'];
+
+function guessStep(key, val) {
+  if (typeof val === 'boolean') return null; /* checkbox */
+  if (typeof val === 'string') return null; /* text */
+  if (key.indexOf('pct') >= 0 || key.indexOf('ratio') >= 0 || key.indexOf('threshold') >= 0)
+    return '0.01';
+  if (key.indexOf('_rr') >= 0 || key.indexOf('_r') >= 0) return '0.1';
+  if (Number.isInteger(val)) return '1';
+  return '0.01';
+}
+
+function renderConfigSection(title, sectionKey, obj, prefix) {
+  if (!obj || typeof obj !== 'object') return '';
+  var path = prefix || sectionKey;
+  var html = '<div class="config-section"><h3>' + title + '</h3>';
+  for (var key in obj) {
+    if (!obj.hasOwnProperty(key)) continue;
+    var val = obj[key];
+    var fullKey = path + '.' + key;
+    /* Skip nested objects (handled separately) and hidden */
+    if (val !== null && typeof val === 'object') continue;
+    if (CONFIG_HIDDEN.indexOf(key) >= 0) continue;
+
+    var step = guessStep(key, val);
+    if (typeof val === 'boolean') {
+      html += '<div class="config-field">'
+        + '<label>' + key + '</label>'
+        + '<select data-path="' + fullKey + '" style="width:100px;background:var(--bg-page);border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text-primary);font-family:var(--font-mono);font-size:12px;">'
+        + '<option value="true"' + (val ? ' selected' : '') + '>true</option>'
+        + '<option value="false"' + (!val ? ' selected' : '') + '>false</option>'
+        + '</select></div>';
+    } else if (typeof val === 'string') {
+      html += '<div class="config-field">'
+        + '<label>' + key + '</label>'
+        + '<input type="text" data-path="' + fullKey + '" value="' + val + '" style="width:140px;"/>'
+        + '</div>';
+    } else {
+      html += '<div class="config-field">'
+        + '<label>' + key + '</label>'
+        + '<input type="number" step="' + step + '" data-path="' + fullKey + '" value="' + val + '"/>'
+        + '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 function loadConfig() {
   fetchJson('/api/config').then(function(data) {
     cachedConfig = data;
-    var fields = document.querySelectorAll('#config-form input');
-    fields.forEach(function(inp) {
-      var key = inp.name;
-      if (data[key] != null) inp.value = data[key];
-    });
+    var grid = document.getElementById('config-grid');
+    var html = '';
+
+    for (var i = 0; i < CONFIG_SECTIONS.length; i++) {
+      var sec = CONFIG_SECTIONS[i];
+      var obj = data[sec];
+      if (!obj || typeof obj !== 'object') continue;
+
+      /* Section title: capitalize */
+      var title = sec.charAt(0).toUpperCase() + sec.slice(1) + ' Settings';
+      html += renderConfigSection(title, sec, obj, sec);
+
+      /* Render nested sub-sections (e.g. strategy.staircase) */
+      for (var key in obj) {
+        if (obj.hasOwnProperty(key) && obj[key] !== null && typeof obj[key] === 'object') {
+          var subTitle = sec + ' &rsaquo; ' + key;
+          html += renderConfigSection(subTitle, key, obj[key], sec + '.' + key);
+        }
+      }
+    }
+
+    grid.innerHTML = html;
   }).catch(function(e) {
     showToast('Failed to load config', 'error');
   });
@@ -1139,13 +1101,29 @@ function saveConfig(e) {
   fb.className = 'save-feedback';
   fb.textContent = '';
 
+  /* Build nested payload from data-path attributes */
   var payload = {};
-  var fields = document.querySelectorAll('#config-form input');
-  fields.forEach(function(inp) {
-    var v = inp.value;
-    if (v !== '' && v != null) {
-      payload[inp.name] = parseFloat(v);
+  var inputs = document.querySelectorAll('#config-form [data-path]');
+  inputs.forEach(function(el) {
+    var path = el.getAttribute('data-path'); /* e.g. "risk.max_leverage" or "strategy.staircase.min_lookback_candles" */
+    var parts = path.split('.');
+    var rawVal = el.tagName === 'SELECT' ? el.value : el.value;
+    if (rawVal === '' || rawVal == null) return;
+
+    /* Parse value */
+    var val;
+    if (rawVal === 'true') val = true;
+    else if (rawVal === 'false') val = false;
+    else if (el.type === 'number') val = parseFloat(rawVal);
+    else val = rawVal;
+
+    /* Build nested object: risk.max_leverage -> {risk: {max_leverage: val}} */
+    var obj = payload;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (!obj[parts[i]]) obj[parts[i]] = {};
+      obj = obj[parts[i]];
     }
+    obj[parts[parts.length - 1]] = val;
   });
 
   fetch('/api/config', {
@@ -1153,17 +1131,18 @@ function saveConfig(e) {
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)
   }).then(function(r) {
-    if (!r.ok) throw new Error('Status ' + r.status);
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || r.status); });
     return r.json();
-  }).then(function() {
+  }).then(function(resp) {
     fb.textContent = 'Saved successfully';
     fb.className = 'save-feedback success show';
     showToast('Configuration saved', 'success');
-    cachedConfig = payload;
+    /* Reload to reflect server-side state */
+    if (resp.config) cachedConfig = resp.config;
   }).catch(function(e) {
     fb.textContent = 'Save failed: ' + e.message;
     fb.className = 'save-feedback error show';
-    showToast('Failed to save config', 'error');
+    showToast('Failed to save config: ' + e.message, 'error');
   }).finally(function() {
     btn.disabled = false;
     setTimeout(function() { fb.classList.remove('show'); }, 4000);

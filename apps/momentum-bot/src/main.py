@@ -231,14 +231,27 @@ class MomentumBot:
     # ------------------------------------------------------------------
 
     async def _apply_config_update(self, updates: dict) -> None:
-        """Apply partial config update from the dashboard."""
+        """Apply partial config update from the dashboard.
+
+        Supports nested updates like:
+            {"risk": {"max_leverage": 5}, "strategy": {"staircase": {"min_lookback_candles": 60}}}
+        """
+        def _apply(target: Any, values: dict) -> None:
+            for key, val in values.items():
+                if isinstance(val, dict):
+                    # Recurse into nested sub-section
+                    sub = getattr(target, key, None)
+                    if sub is not None:
+                        _apply(sub, val)
+                elif hasattr(target, key):
+                    setattr(target, key, val)
+
         for section, values in updates.items():
             target = getattr(self.config, section, None)
             if target is None:
                 continue
-            for key, val in values.items():
-                if hasattr(target, key):
-                    setattr(target, key, val)
+            if isinstance(values, dict):
+                _apply(target, values)
         log.info("config_updated_via_dashboard", sections=list(updates.keys()))
 
     async def _emergency_close_all(self) -> None:
