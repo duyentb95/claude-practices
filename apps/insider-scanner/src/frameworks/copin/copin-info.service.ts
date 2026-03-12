@@ -105,28 +105,38 @@ export class CopinInfoService implements OnModuleInit {
   }
 
   /**
-   * Bulk-fetch top-N addresses by 30-day realised PnL.
+   * Fetch top-N addresses from Copin leaderboard v2 API.
    * Used by LeaderboardMonitorService to pre-warm cache and detect unusual-coin trades.
    */
   async fetchLeaderboardAddresses(limit = 100): Promise<string[]> {
     if (!copinEnabled) return [];
     await this.rateLimit();
     try {
-      const data = await this.postFilter(
-        {
-          ranges: [
-            { fieldName: 'totalTrade',  gte: 5 },
-            { fieldName: 'runTimeDays', gte: 7 },
-          ],
-          sortBy: 'realisedPnl',
-        },
-        limit,
-      );
+      const queryDate = Date.now();
+      const url =
+        `${copinApiUrl}/leaderboards-v2/page` +
+        `?protocol=${PROTOCOL}` +
+        `&queryDate=${queryDate}` +
+        `&statisticType=MONTH` +
+        `&limit=${limit}` +
+        `&offset=0` +
+        `&sort_by=ranking` +
+        `&sort_type=asc`;
+
+      const res = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', 'X-API-KEY': copinApiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        this.logger.warn(`Copin leaderboard-v2 HTTP ${res.status}`);
+        return [];
+      }
+      const data = await res.json() as any;
       const addrs = this.extractAddresses(data);
-      this.logger.warn(`[Leaderboard] Copin returned ${addrs.length} addresses (total=${data?.total ?? '?'})`);
+      this.logger.warn(`[Leaderboard] Copin v2 returned ${addrs.length} addresses (total=${data?.total ?? '?'})`);
       return addrs;
     } catch (e) {
-      this.logger.warn(`Copin leaderboard fetch failed: ${(e as Error).message}`);
+      this.logger.warn(`Copin leaderboard-v2 fetch failed: ${(e as Error).message}`);
       return [];
     }
   }

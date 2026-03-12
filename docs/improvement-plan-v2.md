@@ -138,7 +138,7 @@ Sau Phase 1 (2 data sources):
 **Goal:** Proactive scanning + live clustering.
 
 **Deliverables:**
-- [ ] `LeaderboardMonitorService` — daily scan top 100 wallets từ Copin leaderboard
+- [x] `LeaderboardMonitorService` — daily scan top 100 wallets từ Copin leaderboard (migrated to `/leaderboards-v2/page` API)
 - [ ] Pre-warm cache cho known traders (skip full inspect nếu đã có Copin profile)
 - [ ] In-memory send-graph: khi wallet mới detected, check nếu controller address đã là suspect
 - [ ] Alert: khi leaderboard wallet trade coin bất thường (off their usual 3-5 coins)

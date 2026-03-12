@@ -4,6 +4,13 @@ All notable changes to this skill. Format: [semver] - YYYY-MM-DD
 
 ---
 
+## [3.4.0] - 2026-03-12
+
+### Changed
+- **Copin leaderboard API migrated to v2** — `fetchLeaderboardAddresses()` now uses `GET /leaderboards-v2/page` endpoint instead of `POST /public/{protocol}/position/statistic/filter`. The v2 endpoint provides native ranking and is the current Copin API standard.
+
+---
+
 ## [3.3.0] - 2026-03-12
 
 ### Added

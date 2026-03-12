@@ -121,13 +121,15 @@ Real-time position opens, closes, modifications happening NOW.
 
 ### ━━━ TRADER BOARD ━━━
 
-#### 10. Trader Leaderboard (GET)
+#### 10. Trader Leaderboard v2 (GET)
 ```
-GET /leaderboards/page?protocol=HYPERLIQUID&queryDate={epoch_ms}&statisticType=MONTH&limit=20&offset=0&sort_by=ranking&sort_type=asc
+GET /leaderboards-v2/page?protocol=HYPERLIQUID&queryDate={epoch_ms}&statisticType=MONTH&limit=20&offset=0&sort_by=ranking&sort_type=asc
 Headers: X-API-KEY
 ```
 
 sort_by: `ranking, totalPnl, totalRealisedPnl, totalVolume, totalFee, totalTrade, totalWin, totalLose, totalLiquidation, totalLiquidationAmount`
+
+> **NOTE:** Migrated from `/leaderboards/page` to `/leaderboards-v2/page` as of 2026-03-12.
 
 ### ━━━ AUTHS (JWT) ━━━
 
@@ -261,9 +263,9 @@ curl -X POST https://api.copin.io/HYPERLIQUID/position/filter \
   }'
 ```
 
-### Get leaderboard
+### Get leaderboard (v2)
 ```bash
-curl -X GET "https://api.copin.io/leaderboards/page?protocol=HYPERLIQUID&queryDate=$(date +%s)000&statisticType=MONTH&limit=20&offset=0&sort_by=ranking&sort_type=asc" \
+curl -X GET "https://api.copin.io/leaderboards-v2/page?protocol=HYPERLIQUID&queryDate=$(date +%s)000&statisticType=MONTH&limit=20&offset=0&sort_by=ranking&sort_type=asc" \
   -H "X-API-KEY: ${COPIN_API_KEY}"
 ```
 

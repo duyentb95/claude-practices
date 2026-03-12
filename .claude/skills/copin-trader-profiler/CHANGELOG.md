@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0] - 2026-03-12
+
+### Changed
+- **Leaderboard endpoint migrated to v2** — `GET /leaderboards/page` → `GET /leaderboards-v2/page`. Updated API reference docs and curl templates.
+
+---
+
 ## [1.1.0] - 2026-03-05
 
 ### Changed
