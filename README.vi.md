@@ -151,8 +151,11 @@ Hyperliquid WebSocket (trades)
 | `DEAD_MKT` | Giao dịch coin thanh khoản thấp (<$100k/ngày) |
 | `HIGH_OI` | Trade >10% open interest |
 | `HFT` | Tier maker-rebate qua userFees API |
+| `COPIN_SUSP` | Copin: WR cao + ít trade + hold ngắn → pattern insider |
+| `SMART` | Copin: trader có lợi nhuận ổn định (chỉ báo FP) |
 | `LINKED` | Được nạp tiền bởi suspect đã biết (cluster) |
 | `LB_COIN` | Ví leaderboard trade coin bất thường |
+| `VOL_SPIKE` | Volume 24h > 3× EMA baseline (ngày tin tức/sự kiện, ít nghi ngờ hơn) |
 
 ### Filter MM/HFT
 
@@ -187,6 +190,14 @@ Khi kiểm tra ledger của một ví, `inspectTrader()` quét tất cả các e
 ### Theo dõi Leaderboard
 
 `LeaderboardMonitorService` refresh top-100 trader Hyperliquid (theo PnL 30 ngày) mỗi 6 giờ qua Copin API, pre-warm cache phân loại. Khi một ví leaderboard trade coin nằm ngoài fingerprint lịch sử của họ, hệ thống gửi một Lark alert riêng màu vàng (flag `LB_COIN`).
+
+### Volume EMA Baseline
+
+Volume 24h của mỗi coin được theo dõi dưới dạng đường trung bình động lũy thừa (EMA, α = 0.1, cập nhật mỗi ~60 giây). Khi volume hôm nay vượt 3× EMA baseline, coin nhận flag `VOL_SPIKE` và `scoreC` giảm 3 điểm (ngày tin tức/sự kiện → giao dịch insider ít bất thường hơn). Khi volume thấp hơn 0.5× EMA (thị trường yên tĩnh), `scoreC` tăng +2 (giao dịch nổi bật hơn). Cần ít nhất 10 mẫu EMA (~10 phút) trước khi kích hoạt.
+
+### FP Digest Hàng Ngày
+
+Mỗi ngày một lần vào giờ UTC được cấu hình, scanner gửi một Lark digest card màu xám liệt kê các suspect có điểm HIGH/CRITICAL nhưng có dấu hiệu false-positive (archetype SMART_TRADER, DEGEN, VOLUME_SPIKE không có hot flags). Giúp operator whitelist trader hợp lệ và điều chỉnh ngưỡng scoring.
 
 ---
 
@@ -277,6 +288,13 @@ Tất cả biến đều có giá trị mặc định — hoạt động đượ
 | `LEADERBOARD_REFRESH_MS` | `21600000` | Chu kỳ refresh leaderboard (mặc định 6h) |
 | `LEADERBOARD_SIZE` | `100` | Số lượng top trader cần theo dõi |
 | `LEADERBOARD_ALERT_ENABLED` | `true` | Bật alert unusual-coin cho ví leaderboard |
+
+### Phase 3 — Volume & FP Digest
+
+| Biến | Mặc định | Mô tả |
+|------|---------|-------|
+| `FP_DIGEST_ENABLED` | `true` | Bật Lark alert daily FP digest |
+| `FP_DIGEST_HOUR` | `8` | Giờ UTC để gửi FP digest hàng ngày (0–23) |
 
 Sao chép `.env.example` thành `.env` và thay đổi theo nhu cầu.
 

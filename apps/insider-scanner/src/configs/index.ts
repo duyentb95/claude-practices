@@ -80,3 +80,10 @@ export const leaderboardRefreshMs = parseInt(
 export const leaderboardSize = parseInt(process.env.LEADERBOARD_SIZE || '100');
 // Whether to fire Lark alerts when a leaderboard wallet trades an unusual coin
 export const leaderboardAlertEnabled = process.env.LEADERBOARD_ALERT_ENABLED !== 'false';
+
+// ─── Phase 3: FP Digest ────────────────────────────────────────────────────────
+
+// Whether to send daily FP digest alert (suspects with high FP probability)
+export const fpDigestEnabled = process.env.FP_DIGEST_ENABLED !== 'false';
+// UTC hour to send the daily FP digest (default 8 = 8:00 AM UTC)
+export const fpDigestHour = parseInt(process.env.FP_DIGEST_HOUR || '8');

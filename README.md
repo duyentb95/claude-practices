@@ -151,8 +151,11 @@ Composite score **(A + B + C + D + E) × F + G**, capped at 100:
 | `DEAD_MKT` | Trading illiquid coin (<$100k/day) |
 | `HIGH_OI` | Trade >10% of open interest |
 | `HFT` | Maker-rebate tier via userFees API |
+| `COPIN_SUSP` | Copin: high WR + few trades + short hold → insider pattern |
+| `SMART` | Copin: established profitable trader (FP indicator) |
 | `LINKED` | Funded by a known suspect (cluster) |
 | `LB_COIN` | Leaderboard wallet trading unusual coin |
+| `VOL_SPIKE` | 24h volume > 3× EMA baseline (news/event day, less suspicious) |
 
 ### MM/HFT Filter
 
@@ -187,6 +190,14 @@ When inspecting a wallet's ledger, `inspectTrader()` scans all `send`-type entri
 ### Leaderboard Monitoring
 
 `LeaderboardMonitorService` refreshes the top-100 Hyperliquid traders (by 30d PnL) every 6 hours via Copin API, pre-warming the classification cache. When a leaderboard wallet trades a coin outside its historical fingerprint, a separate yellow Lark alert fires (`LB_COIN` flag).
+
+### Volume EMA Baseline
+
+Each coin's 24h notional volume is tracked as an exponential moving average (α = 0.1, updated every ~60 s). When today's volume exceeds 3× the EMA baseline, the coin receives a `VOL_SPIKE` flag and `scoreC` is reduced by 3 points (news/event day → insider trades are less anomalous). When volume is below 0.5× EMA (quiet market), `scoreC` gains +2 (trade stands out more). Requires 10 EMA samples (~10 min) before activating.
+
+### Daily FP Digest
+
+Once per day at the configured UTC hour, the scanner sends a grey Lark digest card listing HIGH/CRITICAL suspects that show false-positive indicators (SMART_TRADER archetype, DEGEN archetype, VOLUME_SPIKE without hot flags). This helps operators whitelist legitimate traders and tune the scoring thresholds.
 
 ---
 
@@ -277,6 +288,13 @@ All variables are optional — defaults work out of the box for Hyperliquid main
 | `LEADERBOARD_REFRESH_MS` | `21600000` | Leaderboard refresh interval (default 6h) |
 | `LEADERBOARD_SIZE` | `100` | Number of top traders to track |
 | `LEADERBOARD_ALERT_ENABLED` | `true` | Enable unusual-coin alerts for leaderboard wallets |
+
+### Phase 3 — Volume & FP Digest
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FP_DIGEST_ENABLED` | `true` | Enable daily FP digest Lark alert |
+| `FP_DIGEST_HOUR` | `8` | UTC hour to send daily FP digest (0–23) |
 
 Copy `.env.example` to `.env` and override as needed.
 

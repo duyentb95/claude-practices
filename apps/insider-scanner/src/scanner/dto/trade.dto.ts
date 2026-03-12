@@ -20,8 +20,9 @@ export enum InsiderFlag {
   HIGH_LEVERAGE  = 'HIGH_LEV', // Implied leverage ≥ 20x
 
   // Market context flags
-  DEAD_MARKET    = 'DEAD_MKT', // Trade on coin with nearly-zero 24h volume
-  HIGH_OI_RATIO  = 'HIGH_OI',  // Trade notional > 10% of coin's open interest
+  DEAD_MARKET    = 'DEAD_MKT',   // Trade on coin with nearly-zero 24h volume
+  HIGH_OI_RATIO  = 'HIGH_OI',    // Trade notional > 10% of coin's open interest
+  VOLUME_SPIKE   = 'VOL_SPIKE',  // Today's 24h volume > 3× EMA baseline (news/event day → less suspicious)
 
   // Noise filter flags (skipped from suspect list)
   HFT_PATTERN    = 'HFT',      // userAddRate <= 0 via Copin API → market maker / HFT, skip inspection

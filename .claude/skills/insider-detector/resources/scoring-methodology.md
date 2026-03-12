@@ -1,7 +1,7 @@
 # Insider Detection — Scoring Methodology
 
 > Matches `InsiderDetectorService.scoreTrader()` in `apps/insider-scanner/src/scanner/insider-detector.service.ts`
-> Last synced with code: 2026-03-05
+> Last synced with code: 2026-03-12
 
 ---
 
@@ -138,6 +138,18 @@ if      (oiRatio > 0.10) { scoreC += 8; } // flag HIGH_OI_RATIO
 else if (oiRatio > 0.05)   scoreC += 6;
 else if (oiRatio > 0.01)   scoreC += 3;
 
+// Volume EMA anomaly adjustment (Phase 3 — requires ≥10 EMA samples)
+// coinVolumeEma updated every ~60s in refreshCoinTiers(); α = 0.1
+const volEma = coinVolumeEma.get(trade.coin);
+if (volEma && volEma.sampleCount >= 10 && volEma.ema > 0) {
+  const volumeRatio = dayNtlVlm / volEma.ema;
+  if (volumeRatio > 3.0) {
+    scoreC = Math.max(0, scoreC - 3);  // flag VOLUME_SPIKE — news/event day, less suspicious
+  } else if (volumeRatio < 0.5) {
+    scoreC = Math.min(20, scoreC + 2); // quiet market — trade stands out more
+  }
+}
+
 scoreC = Math.min(20, scoreC);
 ```
 
@@ -228,6 +240,11 @@ multiplier = Math.min(1.5, multiplier);
 - Newly funded legitimate large traders who happen to trade immediately
 - Sub-accounts of known market participants (now caught by SUB_ACCOUNT type)
 - Very low liquidity coins where any trade is a large % of volume (DEAD_MARKET flag)
+- Established smart traders flagged for large position on normal coin (SMART_TRADER archetype, scoreG = −8)
+- Volume-spike days (news/events): VOLUME_SPIKE flag reduces scoreC by 3
+
+**Daily FP Digest**: the scanner sends a daily Lark card at configured UTC hour (`FP_DIGEST_HOUR`, default 8)
+listing HIGH/CRITICAL suspects with FP indicators for operator review. Set `FP_DIGEST_ENABLED=false` to disable.
 
 **Known false negative sources:**
 - Insiders using old wallets with trading history (scoreB = 0, reduces A+C+D+E impact)

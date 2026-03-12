@@ -4,6 +4,17 @@ All notable changes to this skill. Format: [semver] - YYYY-MM-DD
 
 ---
 
+## [3.2.0] - 2026-03-12
+
+### Added
+- **Phase 3: Volume EMA baseline for scoreC** — per-coin exponential moving average (α=0.1) maintained via `refreshCoinTiers()` (60s tick). VOLUME_SPIKE flag when today's 24h volume > 3× EMA (scoreC −3); quiet-market bonus when < 0.5× EMA (scoreC +2). Requires 10 samples before activating (~10 min).
+- **Phase 3: Daily FP digest** — `@Cron` method `sendDailyFpDigest()` at configured UTC hour sends a grey Lark card listing HIGH/CRITICAL suspects with FP indicators (SMART_TRADER archetype, DEGEN archetype, VOLUME_SPIKE without hot flags, or high score without smoking-gun flags).
+- **InsiderFlag.VOLUME_SPIKE ('VOL_SPIKE')** — emitted when coin volume > 3× EMA; indicates news/event day (less suspicious context).
+- **Lark flag labels** for `VOLUME_SPIKE` (📣 VOL SPIKE), `COPIN_SUSPICIOUS` (🎯 COPIN SUSP), `SMART_TRADER` (🧠 SMART).
+- **`fpDigestEnabled`** and **`fpDigestHour`** config env vars.
+
+---
+
 ## [3.1.0] - 2026-03-09
 
 ### Added

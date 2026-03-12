@@ -1,7 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { lastValueFrom, catchError, of } from 'rxjs';
-import { larkWebhookUrl, larkAlertCooldownMs, leaderboardAlertEnabled } from '../configs';
+import { larkWebhookUrl, larkAlertCooldownMs, leaderboardAlertEnabled, fpDigestEnabled } from '../configs';
 import { AlertLevel, InsiderFlag, LargeTrade, SuspectEntry } from './dto/trade.dto';
 
 /** Lark webhook rate limit: 5 req/s. Queue with 300ms gap to stay safe. */
@@ -110,6 +110,47 @@ export class LarkAlertService {
                 content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}`,
               },
             ],
+          },
+        ],
+      },
+    });
+  }
+
+  /**
+   * Daily FP digest: summarises suspects that scored HIGH/CRITICAL but show
+   * false-positive indicators (established smart traders, degens, volume-spike days).
+   * Sent once per day at configured UTC hour.
+   */
+  async alertDailyFpDigest(suspects: SuspectEntry[]): Promise<void> {
+    if (!larkWebhookUrl || !fpDigestEnabled || suspects.length === 0) return;
+
+    const rows = suspects.map((s) => {
+      const archetype = s.copinProfile?.archetype ?? 'UNKNOWN';
+      const flags = [...s.flags].map(flagLabel).join(' ');
+      const addr = `${s.address.slice(0, 8)}…${s.address.slice(-4)}`;
+      return `• \`${addr}\` — ${s.alertLevel} ${s.insiderScore}/100 · ${archetype} · ${flags}`;
+    }).join('\n');
+
+    this.enqueue({
+      msg_type: 'interactive',
+      card: {
+        config: { wide_screen_mode: true },
+        header: {
+          title: { content: `🧹 Daily FP Digest — ${suspects.length} potential false positive(s)`, tag: 'plain_text' },
+          template: 'grey',
+        },
+        elements: [
+          {
+            tag: 'div',
+            text: {
+              tag: 'lark_md',
+              content: `Suspects with HIGH/CRITICAL score but FP indicators:\n${rows}`,
+            },
+          },
+          { tag: 'hr' },
+          {
+            tag: 'note',
+            elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
           },
         ],
       },
@@ -402,6 +443,9 @@ function flagLabel(f: InsiderFlag): string {
     case InsiderFlag.HIGH_LEVERAGE:   return '⚠ HIGH LEV';
     case InsiderFlag.DEAD_MARKET:     return '💀 DEAD MKT';
     case InsiderFlag.HIGH_OI_RATIO:   return '📊 HIGH OI';
+    case InsiderFlag.VOLUME_SPIKE:    return '📣 VOL SPIKE';
+    case InsiderFlag.COPIN_SUSPICIOUS: return '🎯 COPIN SUSP';
+    case InsiderFlag.SMART_TRADER:    return '🧠 SMART';
     case InsiderFlag.LINKED_SUSPECT:  return '🔗 LINKED';
     case InsiderFlag.LEADERBOARD_COIN: return '📋 LB_COIN';
     default: return f;

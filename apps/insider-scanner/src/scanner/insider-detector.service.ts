@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Interval } from '@nestjs/schedule';
+import { Cron, Interval } from '@nestjs/schedule';
 import {
   AlertLevel,
   CopinProfile,
@@ -13,6 +13,8 @@ import {
 } from './dto/trade.dto';
 import {
   copinWhitelistRefreshMs,
+  fpDigestEnabled,
+  fpDigestHour,
   maxSuspects,
   maxTradeHistory,
   megaTradeUsd,
@@ -119,6 +121,18 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
    */
   private readonly coinTiers = new Map<string, CoinTierInfo>();
 
+  /**
+   * Per-coin EMA of 24h notional volume (dayNtlVlm), updated every 60s.
+   * alpha = 0.1 → converges to 95% accuracy after ~30 samples (~30 min).
+   * Used in scoreC to detect volume anomalies:
+   *   today > 3× EMA → VOLUME_SPIKE (news/event day, scoreC −3)
+   *   today < 0.5× EMA → quiet day (scoreC +2)
+   * Min 10 samples before activating (avoid false signals on startup).
+   */
+  private readonly coinVolumeEma = new Map<string, { ema: number; sampleCount: number }>();
+  private static readonly VOLUME_EMA_ALPHA = 0.1;
+  private static readonly VOLUME_EMA_MIN_SAMPLES = 10;
+
   /** Log messages for the terminal / web UI */
   readonly logs: string[] = [];
 
@@ -183,6 +197,20 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
           markPx,
           notionalThreshold: calcNotionalThreshold(coin, dayNtlVlm),
         });
+
+        // Update volume EMA for anomaly detection in scoreC
+        if (dayNtlVlm > 0) {
+          const existing = this.coinVolumeEma.get(coin);
+          if (!existing) {
+            this.coinVolumeEma.set(coin, { ema: dayNtlVlm, sampleCount: 1 });
+          } else {
+            this.coinVolumeEma.set(coin, {
+              ema: InsiderDetectorService.VOLUME_EMA_ALPHA * dayNtlVlm +
+                   (1 - InsiderDetectorService.VOLUME_EMA_ALPHA) * existing.ema,
+              sampleCount: existing.sampleCount + 1,
+            });
+          }
+        }
       }
     } catch (e) {
       this.logger.warn(`refreshCoinTiers failed: ${e.message}`);
@@ -653,6 +681,21 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
         else if (oiRatio > 0.01) scoreC += 3;
       }
 
+      // Volume anomaly adjustment (Phase 3 — historical baseline)
+      // Uses EMA of dayNtlVlm to detect unusual volume days.
+      const volEma = this.coinVolumeEma.get(trade.coin);
+      if (volEma && volEma.sampleCount >= InsiderDetectorService.VOLUME_EMA_MIN_SAMPLES && volEma.ema > 0) {
+        const volumeRatio = dayNtlVlm / volEma.ema;
+        if (volumeRatio > 3.0) {
+          // High-volume event day (news/catalyst) → large trades are less unusual → reduce suspicion
+          scoreC = Math.max(0, scoreC - 3);
+          extraFlags.push(InsiderFlag.VOLUME_SPIKE);
+        } else if (volumeRatio < 0.5) {
+          // Unusually quiet day → large trade stands out more → increase suspicion
+          scoreC = Math.min(20, scoreC + 2);
+        }
+      }
+
       scoreC = Math.min(20, scoreC);
     }
 
@@ -833,6 +876,46 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
     this.scanner.stats.suspectsFound = this.suspects.size;
     this.scanner.stats.queueLength   = this.rateLimiter.queueLength;
+  }
+
+  // ─── Daily FP Digest ──────────────────────────────────────────────────────────
+
+  /**
+   * Runs once per day at the configured UTC hour.
+   * Collects suspects with HIGH/CRITICAL score that show FP indicators
+   * (established smart trader, degen archetype, volume-spike context) and
+   * sends a digest card to Lark so operators can review and whitelist if needed.
+   */
+  @Cron(`0 ${fpDigestHour} * * *`)
+  sendDailyFpDigest(): void {
+    if (!fpDigestEnabled) return;
+
+    const fpCandidates = [...this.suspects.values()].filter((s) => {
+      // Must be scored HIGH or CRITICAL to be noteworthy
+      if (s.alertLevel !== AlertLevel.HIGH && s.alertLevel !== AlertLevel.CRITICAL) return false;
+
+      const arch = s.copinProfile?.archetype;
+
+      // Known established traders that are likely FP
+      if (arch === 'SMART_TRADER') return true;
+      if (arch === 'DEGEN') return true;
+
+      // High-score suspects on a volume-spike day (market event, less suspicious)
+      if (s.flags.has(InsiderFlag.VOLUME_SPIKE) && s.insiderScore < 75) return true;
+
+      // High score but has no "smoking gun" flags — possibly noise
+      const hasHotFlag =
+        s.flags.has(InsiderFlag.FRESH_DEPOSIT) ||
+        s.flags.has(InsiderFlag.GHOST_WALLET) ||
+        s.flags.has(InsiderFlag.ONE_SHOT) ||
+        s.flags.has(InsiderFlag.ALL_IN);
+      if (!hasHotFlag && s.insiderScore >= 55 && s.insiderScore < 75) return true;
+
+      return false;
+    });
+
+    this.lark.alertDailyFpDigest(fpCandidates).catch(() => null);
+    this.addLog(`[FP DIGEST] Sent daily digest with ${fpCandidates.length} FP candidate(s)`);
   }
 
   // ─── Sorting helpers ──────────────────────────────────────────────────────────
