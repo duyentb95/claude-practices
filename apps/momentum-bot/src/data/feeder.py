@@ -10,7 +10,7 @@ from typing import Any
 import structlog
 import websockets
 import websockets.asyncio.client as ws_client
-from orjson import orjson
+import json
 
 from src.data.candle_store import CandleStore
 from src.strategy.models import Candle
@@ -191,7 +191,7 @@ class HyperliquidFeeder:
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8")
                 try:
-                    msg = orjson.loads(raw)
+                    msg = json.loads(raw)
                 except Exception:
                     logger.warning("ws_parse_error", raw=raw[:200])
                     continue
@@ -222,7 +222,7 @@ class HyperliquidFeeder:
         """Serialize and send a subscription frame."""
         if self._ws is None:
             return
-        await self._ws.send(orjson.dumps(payload).decode("utf-8"))
+        await self._ws.send(json.dumps(payload))
 
     # ------------------------------------------------------------------
     # Message routing
