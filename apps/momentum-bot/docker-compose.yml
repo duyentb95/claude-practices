@@ -1,0 +1,16 @@
+services:
+  momentum-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - DRY_RUN=${DRY_RUN:-true}
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

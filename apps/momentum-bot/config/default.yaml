@@ -1,0 +1,46 @@
+account:
+  testnet: true
+
+risk:
+  max_risk_per_trade_pct: 0.02
+  max_leverage: 10
+  max_concurrent_positions: 3
+  max_positions_per_coin: 1
+  min_rr_ratio: 1.0
+  daily_loss_limit_pct: 0.05
+  weekly_loss_limit_pct: 0.10
+  max_drawdown_pct: 0.15
+  min_account_balance: 500.0
+
+strategy:
+  regime_lookback_minutes: 120
+  min_volume_per_minute_usd: 100000
+  min_regime_score: 2
+  candle_timeframe: "1m"
+  limit_order_threshold_pct: 3.0
+  stale_position_timeout_minutes: 120
+  staircase:
+    min_lookback_candles: 120
+    pullback_ratio_threshold: 0.4
+    slope_consistency_threshold: 0.5
+  volume:
+    increase_threshold_pct: 5.0
+  volatility:
+    atr_ratio_threshold: 1.5
+    daily_change_threshold_pct: 5.0
+  targets:
+    default_rr: 1.0
+    strong_regime_rr: 1.5
+    trailing_trigger_r: 0.9
+    trailing_lock_r: 0.1
+
+scanner:
+  scan_interval_seconds: 300
+  top_n_candidates: 5
+  min_24h_volume_usd: 5000000
+
+alerts:
+  alert_on_entry: true
+  alert_on_exit: true
+  alert_on_risk_event: true
+  daily_summary: true

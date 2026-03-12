@@ -29,6 +29,16 @@ Thumbs.db
 # Nest / webpack cache
 .nest/
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.whl
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
 # Agent runtime data (raw API dumps, cache — large files, not for git)
 data/raw/
 data/cache/
