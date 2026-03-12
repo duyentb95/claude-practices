@@ -128,8 +128,13 @@ class MarketScanner:
                 skipped_vol += 1
                 continue
 
-            day_change = _safe_float(ctx.get("dayChange", 0))
             mark_px = _safe_float(ctx.get("markPx", 0))
+            prev_day_px = _safe_float(ctx.get("prevDayPx", 0))
+            # Calculate 24h change from prevDayPx (API has no dayChange field)
+            if prev_day_px > 0 and mark_px > 0:
+                day_change = (mark_px - prev_day_px) / prev_day_px
+            else:
+                day_change = 0.0
             open_interest = _safe_float(ctx.get("openInterest", 0))
             oi_usd = open_interest * mark_px
             funding = _safe_float(ctx.get("funding", 0))
@@ -137,6 +142,7 @@ class MarketScanner:
             candidates.append({
                 "coin": coin,
                 "price": mark_px,
+                "prev_day_px": prev_day_px,
                 "change_24h": day_change * 100,
                 "volume_24h": vol_24h,
                 "oi_usd": oi_usd,
@@ -187,11 +193,14 @@ class MarketScanner:
 
         # Take top N by absolute change for detailed evaluation
         top_candidates = candidates[:self._top_n * 2]
+        signal_candidates: list[dict[str, Any]] = []
+
         for c in top_candidates:
             vol_score = min(c["volume_24h"] / 50_000_000, 1.0)  # normalize to 50M
             momentum_score = min(abs(c["change_24h"]) / 10.0, 1.0)  # normalize to 10%
             oi_score = min(c["oi_usd"] / 100_000_000, 1.0)  # normalize to 100M
             composite = round((vol_score * 0.3 + momentum_score * 0.4 + oi_score * 0.3) * 100, 1)
+            c["score"] = composite
 
             direction = c["direction"]
             chg = c["change_24h"]
@@ -225,6 +234,7 @@ class MarketScanner:
                     f"entry ~{c['price']:.4g} funding={c['funding']:.4f}%",
                     data=c,
                 )
+                signal_candidates.append(c)
             elif composite >= 40:
                 self._emit(
                     "WATCH",
@@ -240,10 +250,10 @@ class MarketScanner:
             "SCAN",
             f"Cycle #{self._scan_count} complete — "
             f"{len(top_candidates)} evaluated, "
-            f"{sum(1 for c in top_candidates if (min(c['volume_24h']/50_000_000,1)*0.3+min(abs(c['change_24h'])/10,1)*0.4+min(c['oi_usd']/100_000_000,1)*0.3)*100 >= 60)} signals",
+            f"{len(signal_candidates)} signals",
         )
 
-        return top_candidates
+        return signal_candidates
 
     async def close(self) -> None:
         if self._session:

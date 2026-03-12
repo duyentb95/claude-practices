@@ -23,6 +23,8 @@ from src.config import AppConfig, load_config
 from src.data.candle_store import CandleStore
 from src.data.hl_info import HyperliquidInfoPoller
 from src.data.market_scanner import MarketScanner
+from src.execution.executor import HyperliquidExecutor
+from src.execution.risk_mgr import RiskManager
 from src.strategy.models import (
     ManagedPosition,
     PositionStatus,
@@ -94,6 +96,28 @@ class MomentumBot:
             historical_orders=self._historical_orders,
         )
 
+        # Execution layer (only when credentials available and not dry-run).
+        self._executor: HyperliquidExecutor | None = None
+        self._risk_mgr: RiskManager | None = None
+        if config.hl_private_key and config.hl_account_address:
+            try:
+                self._executor = HyperliquidExecutor(
+                    private_key=config.hl_private_key,
+                    account_address=config.hl_account_address,
+                    testnet=config.hl_testnet,
+                )
+                self._risk_mgr = RiskManager(
+                    executor=self._executor,
+                    config=config.risk,
+                )
+                log.info("executor_ready", testnet=config.hl_testnet)
+            except Exception:
+                log.exception("executor_init_failed")
+                self._executor = None
+                self._risk_mgr = None
+        else:
+            log.warning("no_credentials", msg="HL_PRIVATE_KEY or HL_ACCOUNT_ADDRESS not set — dry-run only")
+
         # Dashboard web server.
         self._dashboard: DashboardServer | None = None
 
@@ -114,7 +138,16 @@ class MomentumBot:
             testnet=self.config.hl_testnet,
             scan_interval=self.config.scanner.scan_interval_seconds,
             max_positions=self.config.risk.max_concurrent_positions,
+            executor="ready" if self._executor else "none",
         )
+
+        # Initialize risk manager (fetch initial equity).
+        if self._risk_mgr and not self.dry_run:
+            try:
+                await self._risk_mgr.initialise()
+                log.info("risk_mgr_ready", equity=self._risk_mgr.initial_equity)
+            except Exception:
+                log.exception("risk_mgr_init_failed")
 
         # Install signal handlers for graceful shutdown.
         loop = asyncio.get_running_loop()
@@ -214,15 +247,56 @@ class MomentumBot:
         Steps:
         1. Fetch market data via MarketScanner (metaAndAssetCtxs).
         2. Screen and rank coins by momentum, volume, OI.
-        3. Emit structured events for the scanner terminal.
+        3. Convert SIGNAL candidates into Signal objects.
+        4. Feed signals through on_signal() for risk checks and execution.
         """
         try:
-            candidates = await self._market_scanner.run_scan()
+            signal_candidates = await self._market_scanner.run_scan()
             log.info(
                 "scan_cycle",
-                candidates=len(candidates),
+                signals=len(signal_candidates),
                 open_positions=len(self._positions),
             )
+
+            # Convert scanner candidates into trading signals
+            for c in signal_candidates:
+                # Skip coins we already have positions in
+                if c["coin"] in self._positions:
+                    log.info("skip_existing_position", coin=c["coin"])
+                    continue
+
+                # Calculate SL/TP from price-based percentage approach
+                price = c["price"]
+                if price <= 0:
+                    continue
+
+                direction = SignalDirection.LONG if c["direction"] == "LONG" else SignalDirection.SHORT
+                # SL distance: 2% of entry price (configurable via risk config)
+                sl_pct = self.config.risk.max_risk_per_trade_pct  # default 2%
+                sl_distance = price * sl_pct
+
+                if direction == SignalDirection.LONG:
+                    sl_price = price - sl_distance
+                    tp_price = price + sl_distance * self.config.strategy.targets.default_rr
+                else:
+                    sl_price = price + sl_distance
+                    tp_price = price - sl_distance * self.config.strategy.targets.default_rr
+
+                signal_obj = Signal(
+                    coin=c["coin"],
+                    direction=direction,
+                    entry_price=round(price, 6),
+                    stop_loss=round(sl_price, 6),
+                    take_profit=round(tp_price, 6),
+                    regime_score=max(2, int(c.get("score", 0) / 20)),  # map 0-100 to 0-5
+                    timestamp=int(time.time() * 1000),
+                    staircase_score=c.get("score", 0),
+                    volume_score=c.get("score", 0),
+                    confidence=c.get("score", 0),
+                )
+
+                await self.on_signal(signal_obj)
+
         except Exception:
             log.exception("market_scanner_error")
 
@@ -270,6 +344,7 @@ class MomentumBot:
         """Handle a new trading signal.
 
         In dry-run mode the signal is logged but no orders are placed.
+        In live mode, size the position, place orders, and set SL/TP.
         """
         # Track signal for dashboard (cap at 100).
         self._signals.append(signal_obj)
@@ -283,13 +358,9 @@ class MomentumBot:
             entry=signal_obj.entry_price,
             sl=signal_obj.stop_loss,
             tp=signal_obj.take_profit,
-            rr=signal_obj.rr_ratio,
-            regime=signal_obj.regime_score,
+            rr=round(signal_obj.rr_ratio, 2),
+            confidence=round(signal_obj.confidence, 1),
         )
-
-        if self.dry_run:
-            log.info("dry_run_signal", signal=signal_obj)
-            return
 
         # Risk checks.
         if len(self._positions) >= self.config.risk.max_concurrent_positions:
@@ -304,21 +375,132 @@ class MomentumBot:
             )
             return
 
-        # Build managed position (size calculation and order execution
-        # would be done by the execution layer).
+        if self.dry_run:
+            log.info(
+                "dry_run_signal",
+                coin=signal_obj.coin,
+                direction=signal_obj.direction.value,
+                entry=signal_obj.entry_price,
+                sl=signal_obj.stop_loss,
+                tp=signal_obj.take_profit,
+            )
+            # Track as virtual position for dashboard visibility
+            position = ManagedPosition(
+                coin=signal_obj.coin,
+                direction=signal_obj.direction,
+                entry_price=signal_obj.entry_price,
+                size=0.0,
+                notional_usd=0.0,
+                stop_loss=signal_obj.stop_loss,
+                take_profit=signal_obj.take_profit,
+                entry_time=signal_obj.timestamp,
+                signal=signal_obj,
+                leverage=self.config.risk.max_leverage,
+            )
+            self._positions[signal_obj.coin] = position
+            return
+
+        # --- Live execution ---
+        if self._executor is None:
+            log.error("no_executor", msg="Cannot place orders — no credentials configured")
+            return
+
+        # Risk manager pre-trade check
+        if self._risk_mgr:
+            can_trade, reason = self._risk_mgr.can_open_trade(len(self._positions))
+            if not can_trade:
+                log.warning("risk_rejected", reason=reason)
+                return
+
+        # Calculate position size
+        equity = float(self._account_summary.get("account_value", 0))
+        if equity <= 0:
+            try:
+                equity = await self._executor.get_equity()
+            except Exception:
+                log.exception("get_equity_failed")
+                return
+
+        if equity < self.config.risk.min_account_balance:
+            log.warning("low_balance", equity=equity, min=self.config.risk.min_account_balance)
+            return
+
+        if self._risk_mgr:
+            size = self._risk_mgr.calculate_position_size(
+                equity=equity,
+                entry_price=signal_obj.entry_price,
+                sl_price=signal_obj.stop_loss,
+            )
+        else:
+            # Fallback: 2% risk sizing
+            sl_dist_pct = abs(signal_obj.entry_price - signal_obj.stop_loss) / signal_obj.entry_price
+            risk_amount = equity * self.config.risk.max_risk_per_trade_pct
+            notional = risk_amount / sl_dist_pct if sl_dist_pct > 0 else 0
+            size = notional / signal_obj.entry_price if signal_obj.entry_price > 0 else 0
+
+        if size <= 0:
+            log.warning("zero_size", coin=signal_obj.coin)
+            return
+
+        notional_usd = size * signal_obj.entry_price
+        is_buy = signal_obj.direction == SignalDirection.LONG
+
+        log.info(
+            "placing_order",
+            coin=signal_obj.coin,
+            direction=signal_obj.direction.value,
+            size=round(size, 6),
+            notional=round(notional_usd, 2),
+            entry=signal_obj.entry_price,
+            sl=signal_obj.stop_loss,
+            tp=signal_obj.take_profit,
+        )
+
+        try:
+            # 1. Entry order (market)
+            entry_result = await self._executor.place_market_order(
+                coin=signal_obj.coin,
+                is_buy=is_buy,
+                size=size,
+            )
+            log.info("entry_order_placed", coin=signal_obj.coin, result=entry_result)
+
+            # 2. Stop-loss (reduce-only trigger)
+            close_is_buy = not is_buy
+            sl_result = await self._executor.set_stop_loss(
+                coin=signal_obj.coin,
+                is_buy=close_is_buy,
+                trigger_price=signal_obj.stop_loss,
+                size=size,
+            )
+            log.info("sl_order_placed", coin=signal_obj.coin, result=sl_result)
+
+            # 3. Take-profit (reduce-only trigger)
+            tp_result = await self._executor.set_take_profit(
+                coin=signal_obj.coin,
+                is_buy=close_is_buy,
+                trigger_price=signal_obj.take_profit,
+                size=size,
+            )
+            log.info("tp_order_placed", coin=signal_obj.coin, result=tp_result)
+
+        except Exception:
+            log.exception("order_placement_failed", coin=signal_obj.coin)
+            return
+
+        # Track position
         position = ManagedPosition(
             coin=signal_obj.coin,
             direction=signal_obj.direction,
             entry_price=signal_obj.entry_price,
-            size=0.0,  # Populated by execution layer.
-            notional_usd=0.0,
+            size=size,
+            notional_usd=notional_usd,
             stop_loss=signal_obj.stop_loss,
             take_profit=signal_obj.take_profit,
             entry_time=signal_obj.timestamp,
             signal=signal_obj,
             leverage=self.config.risk.max_leverage,
         )
-
         self._positions[signal_obj.coin] = position
 
         # Send alerts.

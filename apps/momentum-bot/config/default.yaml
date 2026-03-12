@@ -37,7 +37,7 @@ strategy:
 scanner:
   scan_interval_seconds: 300
   top_n_candidates: 5
-  min_24h_volume_usd: 5000000
+  min_24h_volume_usd: 500000
 
 alerts:
   alert_on_entry: true
