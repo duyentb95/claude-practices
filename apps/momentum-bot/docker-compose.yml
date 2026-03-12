@@ -2,7 +2,7 @@ services:
   momentum-bot:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.local
     env_file: .env
     environment:
       - DRY_RUN=${DRY_RUN:-true}
