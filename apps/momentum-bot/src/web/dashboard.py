@@ -244,6 +244,42 @@ tr:hover td { background:var(--bg-hover); }
   font-size:13px;
 }
 
+/* ===== ACTIVITY LOGS ===== */
+.log-controls {
+  display:flex; gap:8px; align-items:center; padding:10px 16px;
+  border-bottom:1px solid var(--border); flex-wrap:wrap;
+}
+.log-filter-btn {
+  padding:4px 10px; border:1px solid var(--border); border-radius:4px;
+  background:transparent; color:var(--text-muted); font-family:var(--font-mono);
+  font-size:11px; cursor:pointer; transition:all .15s;
+}
+.log-filter-btn:hover { color:var(--text-secondary); border-color:var(--text-muted); }
+.log-filter-btn.active { color:var(--accent); border-color:var(--accent); background:rgba(78,174,253,0.08); }
+.log-count { margin-left:auto; color:var(--text-muted); font-size:11px; }
+.log-list {
+  max-height:480px; overflow-y:auto; font-size:12px;
+}
+.log-entry {
+  display:grid;
+  grid-template-columns: 76px 62px 1fr;
+  gap:8px; padding:5px 16px;
+  border-bottom:1px solid rgba(49,56,86,0.3);
+  line-height:1.6;
+}
+.log-entry:hover { background:var(--bg-hover); }
+.log-time { color:var(--text-muted); white-space:nowrap; }
+.log-level { font-weight:700; white-space:nowrap; font-size:11px; }
+.log-level-DEBUG { color:var(--text-muted); }
+.log-level-INFO { color:var(--accent); }
+.log-level-WARNING { color:var(--warning); }
+.log-level-ERROR { color:var(--loss); }
+.log-level-CRITICAL { color:#ff4040; }
+.log-msg { color:var(--text-secondary); word-break:break-word; }
+.log-msg .log-extra { color:var(--text-muted); margin-left:6px; }
+.log-auto-scroll { font-size:11px; display:flex; align-items:center; gap:4px; color:var(--text-muted); cursor:pointer; }
+.log-auto-scroll input { cursor:pointer; }
+
 /* ===== TOAST ===== */
 .toast {
   position:fixed; bottom:24px; right:24px; z-index:200;
@@ -307,6 +343,7 @@ tr:hover td { background:var(--bg-hover); }
   <button class="tab-btn" data-tab="positions">Positions</button>
   <button class="tab-btn" data-tab="orders">Orders &amp; Fills</button>
   <button class="tab-btn" data-tab="history">History</button>
+  <button class="tab-btn" data-tab="logs">Logs</button>
   <button class="tab-btn" data-tab="config">Config</button>
 </nav>
 
@@ -364,6 +401,13 @@ tr:hover td { background:var(--bg-hover); }
         <div id="dash-signals-body"></div>
       </div>
       <div class="empty-state" id="dash-signals-empty">No recent signals</div>
+    </div>
+
+    <!-- Activity Logs (compact, last 30) -->
+    <div class="table-wrap">
+      <div class="table-title">Activity Logs</div>
+      <div class="log-list" id="dash-logs" style="max-height:280px;"></div>
+      <div class="empty-state" id="dash-logs-empty">No activity logs yet</div>
     </div>
   </section>
 
@@ -463,6 +507,26 @@ tr:hover td { background:var(--bg-hover); }
           <div class="sr-value" id="hist-total">0</div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ===== LOGS TAB ===== -->
+  <section class="tab-panel" id="panel-logs">
+    <div class="table-wrap">
+      <div class="table-title">System Activity Logs</div>
+      <div class="log-controls">
+        <button class="log-filter-btn active" data-level="">ALL</button>
+        <button class="log-filter-btn" data-level="DEBUG">DEBUG</button>
+        <button class="log-filter-btn" data-level="INFO">INFO</button>
+        <button class="log-filter-btn" data-level="WARNING">WARN</button>
+        <button class="log-filter-btn" data-level="ERROR">ERROR</button>
+        <label class="log-auto-scroll">
+          <input type="checkbox" id="log-autoscroll" checked/> Auto-scroll
+        </label>
+        <span class="log-count" id="log-count">0 entries</span>
+      </div>
+      <div class="log-list" id="logs-body" style="max-height:calc(100vh - 280px);"></div>
+      <div class="empty-state" id="logs-empty">Waiting for activity logs...</div>
     </div>
   </section>
 
@@ -735,6 +799,7 @@ function pollAll() {
   fetchJson('/api/status').then(updateStatus).catch(function(){});
   fetchJson('/api/positions').then(updatePositions).catch(function(){});
   fetchJson('/api/signals').then(updateSignals).catch(function(){});
+  fetchJson('/api/logs?limit=200').then(updateLogs).catch(function(){});
   if (currentTab === 'orders') {
     fetchJson('/api/fills').then(updateFills).catch(function(){});
   }
@@ -952,6 +1017,79 @@ function updateHistory(data) {
     document.getElementById('hist-total').textContent = trades.length;
   }
 }
+
+/* ===== LOGS ===== */
+var logFilter = '';
+
+function renderLogEntry(e) {
+  var ts = e.timestamp || '';
+  var t = ts.length > 19 ? ts.substring(11, 19) : ts;
+  var lvl = (e.level || 'INFO').toUpperCase();
+  var msg = e.event || '';
+  var extra = '';
+  if (e.extra) {
+    var parts = [];
+    for (var k in e.extra) {
+      if (e.extra.hasOwnProperty(k)) {
+        var v = e.extra[k];
+        if (typeof v === 'object') v = JSON.stringify(v);
+        parts.push(k + '=' + v);
+      }
+    }
+    if (parts.length) extra = '<span class="log-extra">' + parts.join(' ') + '</span>';
+  }
+  var mod = e.module ? (e.module + (e.func ? '.' + e.func : '')) : '';
+  if (mod) msg = '<strong>' + mod + '</strong> ' + msg;
+  return '<div class="log-entry">'
+    + '<span class="log-time">' + t + '</span>'
+    + '<span class="log-level log-level-' + lvl + '">' + lvl + '</span>'
+    + '<span class="log-msg">' + msg + extra + '</span>'
+    + '</div>';
+}
+
+function updateLogs(data) {
+  var logs = data.logs || [];
+  var total = data.total || 0;
+
+  /* Dashboard compact logs (last 30, no filter) */
+  var dashLogs = document.getElementById('dash-logs');
+  var dashEmpty = document.getElementById('dash-logs-empty');
+  var recent30 = logs.slice(0, 30);
+  if (recent30.length === 0) {
+    dashLogs.innerHTML = '';
+    dashEmpty.style.display = 'block';
+  } else {
+    dashEmpty.style.display = 'none';
+    dashLogs.innerHTML = recent30.map(renderLogEntry).join('');
+  }
+
+  /* Full logs tab */
+  var filtered = logFilter ? logs.filter(function(e) { return (e.level || '').toUpperCase() === logFilter; }) : logs;
+  var body = document.getElementById('logs-body');
+  var empty = document.getElementById('logs-empty');
+  var countEl = document.getElementById('log-count');
+  countEl.textContent = total + ' entries' + (logFilter ? ' (' + filtered.length + ' shown)' : '');
+  if (filtered.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    body.innerHTML = filtered.map(renderLogEntry).join('');
+    var autoScroll = document.getElementById('log-autoscroll');
+    if (autoScroll && autoScroll.checked) {
+      body.scrollTop = body.scrollHeight;
+    }
+  }
+}
+
+/* Log filter buttons */
+document.querySelectorAll('.log-filter-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.log-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    logFilter = btn.getAttribute('data-level') || '';
+  });
+});
 
 /* ===== CONFIG ===== */
 function loadConfig() {

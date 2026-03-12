@@ -200,6 +200,7 @@ class DashboardServer:
         self._app.router.add_get("/api/fills", self._handle_fills)
         self._app.router.add_get("/api/history", self._handle_history)
         self._app.router.add_get("/api/signals", self._handle_signals)
+        self._app.router.add_get("/api/logs", self._handle_logs)
         self._app.router.add_get("/api/config", self._handle_get_config)
         self._app.router.add_post("/api/config", self._handle_update_config)
         self._app.router.add_post("/api/emergency-close", self._handle_emergency_close)
@@ -309,6 +310,17 @@ class DashboardServer:
         return _json_response(
             {"signals": [_signal_to_dict(s) for s in reversed(recent)]}
         )
+
+    async def _handle_logs(self, request: web.Request) -> web.Response:
+        """GET /api/logs -- recent activity logs from the ring buffer."""
+        from src.utils.logger import log_collector
+
+        limit = int(request.query.get("limit", "200"))
+        level = request.query.get("level", "").upper()
+        entries = log_collector.get_entries(limit=min(limit, 500))
+        if level:
+            entries = [e for e in entries if e.get("level") == level]
+        return _json_response({"logs": entries, "total": len(log_collector)})
 
     async def _handle_get_config(self, _request: web.Request) -> web.Response:
         """GET /api/config -- current config without secrets."""
