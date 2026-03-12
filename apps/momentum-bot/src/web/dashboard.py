@@ -324,11 +324,11 @@ tr:hover td { background:var(--bg-hover); }
       <div class="hs-value" id="hdr-balance">--</div>
     </div>
     <div class="header-stat">
-      <div class="hs-label">Total PnL</div>
+      <div class="hs-label">Net Position</div>
       <div class="hs-value" id="hdr-pnl">--</div>
     </div>
     <div class="header-stat">
-      <div class="hs-label">Win Rate</div>
+      <div class="hs-label">Positions</div>
       <div class="hs-value" id="hdr-winrate">--</div>
     </div>
   </div>
@@ -354,20 +354,28 @@ tr:hover td { background:var(--bg-hover); }
   <section class="tab-panel active" id="panel-dashboard">
     <div class="stats-row">
       <div class="stat-card">
-        <div class="label">Total PnL</div>
-        <div class="value" id="dash-pnl">$0.00</div>
+        <div class="label">Account Value</div>
+        <div class="value" id="dash-balance">--</div>
       </div>
       <div class="stat-card">
-        <div class="label">Win Rate</div>
-        <div class="value" id="dash-winrate">0%</div>
+        <div class="label">Unrealized PnL</div>
+        <div class="value" id="dash-pnl">--</div>
       </div>
       <div class="stat-card">
         <div class="label">Open Positions</div>
         <div class="value" id="dash-open">0</div>
       </div>
       <div class="stat-card">
-        <div class="label">Scanned Coins</div>
-        <div class="value" id="dash-scanned">0</div>
+        <div class="label">Open Orders</div>
+        <div class="value" id="dash-orders-count">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Margin Used</div>
+        <div class="value" id="dash-margin">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Withdrawable</div>
+        <div class="value" id="dash-withdrawable">--</div>
       </div>
     </div>
 
@@ -377,10 +385,10 @@ tr:hover td { background:var(--bg-hover); }
       <table>
         <thead>
           <tr>
-            <th>Coin</th><th>Direction</th><th class="text-right">Entry</th>
-            <th class="text-right">Current</th><th class="text-right">PnL</th>
-            <th class="text-right">PnL%</th><th class="text-right">R-Multiple</th>
-            <th>Duration</th><th class="text-right">Trailing SL</th>
+            <th>Coin</th><th>Direction</th><th class="text-right">Size</th>
+            <th class="text-right">Entry</th><th class="text-right">Value</th>
+            <th class="text-right">uPnL</th><th class="text-right">ROE%</th>
+            <th class="text-right">Leverage</th><th class="text-right">Liq. Price</th>
           </tr>
         </thead>
         <tbody id="dash-positions-body"></tbody>
@@ -414,18 +422,16 @@ tr:hover td { background:var(--bg-hover); }
   <!-- ===== POSITIONS TAB ===== -->
   <section class="tab-panel" id="panel-positions">
     <div class="table-wrap">
-      <div class="table-title">Open Positions</div>
+      <div class="table-title">Hyperliquid Positions</div>
       <div style="overflow-x:auto;">
         <table>
           <thead>
             <tr>
               <th>Coin</th><th>Direction</th><th class="text-right">Size</th>
-              <th class="text-right">Notional</th><th class="text-right">Entry</th>
-              <th class="text-right">Current</th><th class="text-right">SL</th>
-              <th class="text-right">TP</th><th class="text-right">Trailing SL</th>
-              <th class="text-right">PnL</th><th class="text-right">PnL%</th>
-              <th class="text-right">Leverage</th><th class="text-right">Regime</th>
-              <th>Duration</th><th>Status</th>
+              <th class="text-right">Entry Price</th><th class="text-right">Position Value</th>
+              <th class="text-right">Unrealized PnL</th><th class="text-right">ROE%</th>
+              <th class="text-right">Leverage</th><th class="text-right">Margin Used</th>
+              <th class="text-right">Liq. Price</th>
             </tr>
           </thead>
           <tbody id="pos-body"></tbody>
@@ -473,37 +479,36 @@ tr:hover td { background:var(--bg-hover); }
   <!-- ===== HISTORY TAB ===== -->
   <section class="tab-panel" id="panel-history">
     <div class="table-wrap">
-      <div class="table-title">Closed Positions</div>
+      <div class="table-title">Recent Fills</div>
       <div style="overflow-x:auto;">
         <table>
           <thead>
             <tr>
-              <th>Coin</th><th>Direction</th><th class="text-right">Entry</th>
-              <th class="text-right">Exit</th><th class="text-right">Size</th>
-              <th class="text-right">PnL</th><th class="text-right">PnL%</th>
-              <th class="text-right">R-Multiple</th><th class="text-right">Regime</th>
-              <th>Duration</th><th>Exit Reason</th><th>Time</th>
+              <th>Time</th><th>Coin</th><th>Side</th>
+              <th class="text-right">Size</th><th class="text-right">Price</th>
+              <th class="text-right">Fee</th><th class="text-right">Closed PnL</th>
+              <th>Direction</th>
             </tr>
           </thead>
           <tbody id="history-body"></tbody>
         </table>
       </div>
-      <div class="empty-state" id="history-empty">No closed positions</div>
+      <div class="empty-state" id="history-empty">No fills yet</div>
       <div class="summary-row" id="history-summary" style="display:none;">
         <div class="sr-item">
-          <div class="sr-label">Total PnL</div>
+          <div class="sr-label">Realized PnL</div>
           <div class="sr-value" id="hist-total-pnl">$0.00</div>
         </div>
         <div class="sr-item">
-          <div class="sr-label">Avg R-Multiple</div>
-          <div class="sr-value" id="hist-avg-r">0.00</div>
+          <div class="sr-label">Total Fees</div>
+          <div class="sr-value" id="hist-total-fees">$0.00</div>
         </div>
         <div class="sr-item">
           <div class="sr-label">Win Rate</div>
           <div class="sr-value" id="hist-winrate">0%</div>
         </div>
         <div class="sr-item">
-          <div class="sr-label">Total Trades</div>
+          <div class="sr-label">Trades</div>
           <div class="sr-value" id="hist-total">0</div>
         </div>
       </div>
@@ -800,9 +805,8 @@ function pollAll() {
   fetchJson('/api/positions').then(updatePositions).catch(function(){});
   fetchJson('/api/signals').then(updateSignals).catch(function(){});
   fetchJson('/api/logs?limit=200').then(updateLogs).catch(function(){});
-  if (currentTab === 'orders') {
-    fetchJson('/api/fills').then(updateFills).catch(function(){});
-  }
+  fetchJson('/api/orders').then(updateOrders).catch(function(){});
+  fetchJson('/api/fills').then(updateFillsTab).catch(function(){});
   if (currentTab === 'history') {
     fetchJson('/api/history').then(updateHistory).catch(function(){});
   }
@@ -825,22 +829,49 @@ function updateStatus(data) {
   document.getElementById('hdr-uptime').textContent = fmtDuration(data.uptime_ms);
   document.getElementById('hdr-balance').textContent = fmtUsd(data.balance);
   var pnlEl = document.getElementById('hdr-pnl');
-  pnlEl.textContent = fmtUsd(data.total_pnl);
-  pnlEl.className = 'hs-value ' + pnlClass(data.total_pnl);
-  document.getElementById('hdr-winrate').textContent = fmtPct(data.win_rate);
+  pnlEl.textContent = fmtUsd(data.total_ntl_pos);
+  pnlEl.className = 'hs-value ' + pnlClass(data.total_ntl_pos);
+  document.getElementById('hdr-winrate').textContent = data.open_positions + ' pos / ' + data.open_orders_count + ' ord';
 
   /* dashboard stat cards */
+  document.getElementById('dash-balance').textContent = fmtUsd(data.balance);
   var dp = document.getElementById('dash-pnl');
-  dp.textContent = fmtUsd(data.total_pnl);
-  dp.className = 'value ' + pnlClass(data.total_pnl);
-  document.getElementById('dash-winrate').textContent = fmtPct(data.win_rate);
+  dp.textContent = fmtUsd(data.total_ntl_pos);
+  dp.className = 'value ' + pnlClass(data.total_ntl_pos);
   document.getElementById('dash-open').textContent = data.open_positions != null ? data.open_positions : '0';
-  document.getElementById('dash-scanned').textContent = data.scanned_coins != null ? data.scanned_coins : '0';
+  document.getElementById('dash-orders-count').textContent = data.open_orders_count != null ? data.open_orders_count : '0';
+  document.getElementById('dash-margin').textContent = fmtUsd(data.total_margin_used);
+  document.getElementById('dash-withdrawable').textContent = fmtUsd(data.withdrawable);
 }
 
 /* ===== UPDATE: POSITIONS ===== */
 function updatePositions(data) {
   var positions = Array.isArray(data) ? data : (data.positions || []);
+
+  function posDir(p) {
+    var sz = parseFloat(p.size);
+    if (sz > 0) return 'LONG';
+    if (sz < 0) return 'SHORT';
+    return '--';
+  }
+
+  function renderPosRow(p) {
+    var dir = posDir(p);
+    var roe = p.return_on_equity != null ? (parseFloat(p.return_on_equity) * 100) : null;
+    var lev = p.leverage_value ? (p.leverage_value + 'x ' + (p.leverage_type || '')) : '--';
+    var liq = p.liquidation_px;
+    return '<tr>'
+      + '<td>' + (p.coin || '--') + '</td>'
+      + '<td>' + dirBadge(dir) + '</td>'
+      + '<td class="text-right">' + (p.size != null ? Math.abs(p.size) : '--') + '</td>'
+      + '<td class="text-right">' + fmtPrice(p.entry_price) + '</td>'
+      + '<td class="text-right">' + fmtUsd(p.position_value) + '</td>'
+      + '<td class="text-right ' + pnlClass(p.unrealized_pnl) + '">' + fmtUsd(p.unrealized_pnl) + '</td>'
+      + '<td class="text-right ' + pnlClass(roe) + '">' + (roe != null ? roe.toFixed(2) + '%' : '--') + '</td>'
+      + '<td class="text-right">' + lev + '</td>'
+      + '<td class="text-right text-muted">' + (liq ? fmtPrice(parseFloat(liq)) : '--') + '</td>'
+      + '</tr>';
+  }
 
   /* Dashboard compact table */
   var dashBody = document.getElementById('dash-positions-body');
@@ -850,20 +881,7 @@ function updatePositions(data) {
     dashEmpty.style.display = 'block';
   } else {
     dashEmpty.style.display = 'none';
-    dashBody.innerHTML = positions.map(function(p) {
-      var dur = p.opened_at ? (Date.now() - new Date(p.opened_at).getTime()) : null;
-      return '<tr>'
-        + '<td>' + (p.coin || '--') + '</td>'
-        + '<td>' + dirBadge(p.direction) + '</td>'
-        + '<td class="text-right">' + fmtPrice(p.entry_price) + '</td>'
-        + '<td class="text-right">' + fmtPrice(p.current_price) + '</td>'
-        + '<td class="text-right ' + pnlClass(p.pnl) + '">' + fmtUsd(p.pnl) + '</td>'
-        + '<td class="text-right ' + pnlClass(p.pnl_pct) + '">' + fmtPct(p.pnl_pct) + '</td>'
-        + '<td class="text-right ' + pnlClass(p.r_multiple) + '">' + fmtR(p.r_multiple) + '</td>'
-        + '<td class="text-muted">' + fmtDuration(dur) + '</td>'
-        + '<td class="text-right text-secondary">' + fmtPrice(p.trailing_sl) + '</td>'
-        + '</tr>';
-    }).join('');
+    dashBody.innerHTML = positions.map(renderPosRow).join('');
   }
 
   /* Full positions table */
@@ -875,23 +893,21 @@ function updatePositions(data) {
   } else {
     posEmpty.style.display = 'none';
     posBody.innerHTML = positions.map(function(p) {
-      var dur = p.opened_at ? (Date.now() - new Date(p.opened_at).getTime()) : null;
+      var dir = posDir(p);
+      var roe = p.return_on_equity != null ? (parseFloat(p.return_on_equity) * 100) : null;
+      var lev = p.leverage_value ? (p.leverage_value + 'x ' + (p.leverage_type || '')) : '--';
+      var liq = p.liquidation_px;
       return '<tr>'
         + '<td>' + (p.coin || '--') + '</td>'
-        + '<td>' + dirBadge(p.direction) + '</td>'
-        + '<td class="text-right">' + (p.size != null ? p.size : '--') + '</td>'
-        + '<td class="text-right">' + fmtUsd(p.notional) + '</td>'
+        + '<td>' + dirBadge(dir) + '</td>'
+        + '<td class="text-right">' + (p.size != null ? Math.abs(p.size) : '--') + '</td>'
         + '<td class="text-right">' + fmtPrice(p.entry_price) + '</td>'
-        + '<td class="text-right">' + fmtPrice(p.current_price) + '</td>'
-        + '<td class="text-right text-secondary">' + fmtPrice(p.sl) + '</td>'
-        + '<td class="text-right text-secondary">' + fmtPrice(p.tp) + '</td>'
-        + '<td class="text-right text-secondary">' + fmtPrice(p.trailing_sl) + '</td>'
-        + '<td class="text-right ' + pnlClass(p.pnl) + '">' + fmtUsd(p.pnl) + '</td>'
-        + '<td class="text-right ' + pnlClass(p.pnl_pct) + '">' + fmtPct(p.pnl_pct) + '</td>'
-        + '<td class="text-right">' + (p.leverage != null ? p.leverage + 'x' : '--') + '</td>'
-        + '<td class="text-right">' + (p.regime_score != null ? p.regime_score : '--') + '</td>'
-        + '<td class="text-muted">' + fmtDuration(dur) + '</td>'
-        + '<td>' + statusBadge(p.status || 'OPEN') + '</td>'
+        + '<td class="text-right">' + fmtUsd(p.position_value) + '</td>'
+        + '<td class="text-right ' + pnlClass(p.unrealized_pnl) + '">' + fmtUsd(p.unrealized_pnl) + '</td>'
+        + '<td class="text-right ' + pnlClass(roe) + '">' + (roe != null ? roe.toFixed(2) + '%' : '--') + '</td>'
+        + '<td class="text-right">' + lev + '</td>'
+        + '<td class="text-right">' + fmtUsd(p.margin_used) + '</td>'
+        + '<td class="text-right text-muted">' + (liq ? fmtPrice(parseFloat(liq)) : '--') + '</td>'
         + '</tr>';
     }).join('');
   }
@@ -923,11 +939,9 @@ function updateSignals(data) {
   }
 }
 
-/* ===== UPDATE: ORDERS & FILLS ===== */
-function updateFills(data) {
+/* ===== UPDATE: ORDERS ===== */
+function updateOrders(data) {
   var orders = data.orders || [];
-  var fills = data.fills || [];
-
   var oBody = document.getElementById('orders-body');
   var oEmpty = document.getElementById('orders-empty');
   if (orders.length === 0) {
@@ -936,10 +950,13 @@ function updateFills(data) {
   } else {
     oEmpty.style.display = 'none';
     oBody.innerHTML = orders.map(function(o) {
+      var extra = '';
+      if (o.trigger_px) extra = ' @ ' + fmtPrice(o.trigger_px);
+      if (o.reduce_only) extra += ' [RO]';
       return '<tr>'
         + '<td>' + (o.coin || '--') + '</td>'
         + '<td>' + sideBadge(o.side) + '</td>'
-        + '<td>' + (o.type || '--') + '</td>'
+        + '<td>' + (o.type || 'Limit') + extra + '</td>'
         + '<td class="text-right">' + (o.size != null ? o.size : '--') + '</td>'
         + '<td class="text-right">' + fmtPrice(o.price) + '</td>'
         + '<td>' + statusBadge(o.status) + '</td>'
@@ -947,7 +964,11 @@ function updateFills(data) {
         + '</tr>';
     }).join('');
   }
+}
 
+/* ===== UPDATE: FILLS ===== */
+function updateFillsTab(data) {
+  var fills = data.fills || [];
   var fBody = document.getElementById('fills-body');
   var fEmpty = document.getElementById('fills-empty');
   if (fills.length === 0) {
@@ -955,7 +976,7 @@ function updateFills(data) {
     fEmpty.style.display = 'block';
   } else {
     fEmpty.style.display = 'none';
-    fBody.innerHTML = fills.map(function(f) {
+    fBody.innerHTML = fills.slice(0, 50).map(function(f) {
       return '<tr>'
         + '<td>' + (f.coin || '--') + '</td>'
         + '<td>' + sideBadge(f.side) + '</td>'
@@ -968,53 +989,40 @@ function updateFills(data) {
   }
 }
 
-/* ===== UPDATE: HISTORY ===== */
+/* ===== UPDATE: HISTORY (fills) ===== */
 function updateHistory(data) {
-  var trades = Array.isArray(data) ? data : (data.trades || []);
+  var fills = data.fills || [];
   var body = document.getElementById('history-body');
   var empty = document.getElementById('history-empty');
   var summary = document.getElementById('history-summary');
 
-  if (trades.length === 0) {
+  if (fills.length === 0) {
     body.innerHTML = '';
     empty.style.display = 'block';
     summary.style.display = 'none';
   } else {
     empty.style.display = 'none';
     summary.style.display = 'flex';
-    body.innerHTML = trades.map(function(t) {
-      var dur = (t.opened_at && t.closed_at)
-        ? (new Date(t.closed_at).getTime() - new Date(t.opened_at).getTime()) : null;
+    body.innerHTML = fills.map(function(f) {
       return '<tr>'
-        + '<td>' + (t.coin || '--') + '</td>'
-        + '<td>' + dirBadge(t.direction) + '</td>'
-        + '<td class="text-right">' + fmtPrice(t.entry_price) + '</td>'
-        + '<td class="text-right">' + fmtPrice(t.exit_price) + '</td>'
-        + '<td class="text-right">' + (t.size != null ? t.size : '--') + '</td>'
-        + '<td class="text-right ' + pnlClass(t.pnl) + '">' + fmtUsd(t.pnl) + '</td>'
-        + '<td class="text-right ' + pnlClass(t.pnl_pct) + '">' + fmtPct(t.pnl_pct) + '</td>'
-        + '<td class="text-right ' + pnlClass(t.r_multiple) + '">' + fmtR(t.r_multiple) + '</td>'
-        + '<td class="text-right">' + (t.regime_score != null ? t.regime_score : '--') + '</td>'
-        + '<td class="text-muted">' + fmtDuration(dur) + '</td>'
-        + '<td>' + (t.exit_reason || '--') + '</td>'
-        + '<td class="text-muted">' + fmtRelative(t.closed_at) + '</td>'
+        + '<td class="text-muted">' + fmtRelative(f.time) + '</td>'
+        + '<td>' + (f.coin || '--') + '</td>'
+        + '<td>' + sideBadge(f.side) + '</td>'
+        + '<td class="text-right">' + (f.size != null ? f.size : '--') + '</td>'
+        + '<td class="text-right">' + fmtPrice(f.price) + '</td>'
+        + '<td class="text-right">' + fmtUsd(f.fee) + '</td>'
+        + '<td class="text-right ' + pnlClass(f.closed_pnl) + '">' + (f.closed_pnl ? fmtUsd(f.closed_pnl) : '--') + '</td>'
+        + '<td class="text-muted">' + (f.dir || '--') + '</td>'
         + '</tr>';
     }).join('');
 
-    /* Summary */
-    var totalPnl = 0, totalR = 0, wins = 0;
-    trades.forEach(function(t) {
-      var pnl = parseFloat(t.pnl) || 0;
-      totalPnl += pnl;
-      totalR += parseFloat(t.r_multiple) || 0;
-      if (pnl > 0) wins++;
-    });
+    /* Summary from API */
     var tp = document.getElementById('hist-total-pnl');
-    tp.textContent = fmtUsd(totalPnl);
-    tp.className = 'sr-value ' + pnlClass(totalPnl);
-    document.getElementById('hist-avg-r').textContent = trades.length > 0 ? (totalR / trades.length).toFixed(2) + 'R' : '0.00R';
-    document.getElementById('hist-winrate').textContent = trades.length > 0 ? (wins / trades.length * 100).toFixed(1) + '%' : '0%';
-    document.getElementById('hist-total').textContent = trades.length;
+    tp.textContent = fmtUsd(data.total_realized_pnl);
+    tp.className = 'sr-value ' + pnlClass(data.total_realized_pnl);
+    document.getElementById('hist-total-fees').textContent = fmtUsd(data.total_fees);
+    document.getElementById('hist-winrate').textContent = data.win_rate != null ? data.win_rate + '%' : '0%';
+    document.getElementById('hist-total').textContent = data.total_trades || 0;
   }
 }
 

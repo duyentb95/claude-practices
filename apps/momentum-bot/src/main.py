@@ -20,6 +20,7 @@ from src.alerts.lark import LarkAlerter
 from src.alerts.telegram import TelegramAlerter
 from src.config import AppConfig, load_config
 from src.data.candle_store import CandleStore
+from src.data.hl_info import HyperliquidInfoPoller
 from src.strategy.models import (
     ManagedPosition,
     PositionStatus,
@@ -64,6 +65,23 @@ class MomentumBot:
         # Subscribed coins for candle data.
         self._subscribed_coins: set[str] = set()
 
+        # Shared containers for Hyperliquid live data.
+        self._account_summary: dict[str, Any] = {}
+        self._hl_positions: list[dict[str, Any]] = []
+        self._open_orders: list[dict[str, Any]] = []
+        self._recent_fills: list[dict[str, Any]] = []
+        self._historical_orders: list[dict[str, Any]] = []
+
+        # Hyperliquid info poller.
+        self._hl_poller = HyperliquidInfoPoller(
+            account_address=config.hl_account_address,
+            account_summary=self._account_summary,
+            hl_positions=self._hl_positions,
+            open_orders=self._open_orders,
+            recent_fills=self._recent_fills,
+            historical_orders=self._historical_orders,
+        )
+
         # Dashboard web server.
         self._dashboard: DashboardServer | None = None
 
@@ -101,15 +119,21 @@ class MomentumBot:
             signals=self._signals,
             subscribed_coins=self._subscribed_coins,
             candle_store=self.candle_store,
+            account_summary=self._account_summary,
+            hl_positions=self._hl_positions,
+            open_orders=self._open_orders,
+            recent_fills=self._recent_fills,
+            historical_orders=self._historical_orders,
             update_config=self._apply_config_update,
             emergency_close=self._emergency_close_all,
         )
         self._dashboard = DashboardServer(bot_state)
         await self._dashboard.start()
 
-        # Run the scanning and position management loops concurrently.
+        # Run the scanning, position management, and data poller loops concurrently.
         try:
             async with asyncio.TaskGroup() as tg:
+                tg.create_task(self._hl_poller.run(), name="hl_info_poller")
                 tg.create_task(self.scan_loop(), name="scan_loop")
                 tg.create_task(self.position_loop(), name="position_loop")
         except* asyncio.CancelledError:

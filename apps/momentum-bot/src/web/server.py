@@ -44,8 +44,13 @@ class BotState:
     signals: list[Signal]  # recent signals, capped by caller
     subscribed_coins: set[str]
     candle_store: CandleStore
+
+    # Hyperliquid live data (populated by HyperliquidInfoPoller)
+    account_summary: dict[str, Any] = field(default_factory=dict)
+    hl_positions: list[dict[str, Any]] = field(default_factory=list)
     open_orders: list[dict[str, Any]] = field(default_factory=list)
     recent_fills: list[dict[str, Any]] = field(default_factory=list)
+    historical_orders: list[dict[str, Any]] = field(default_factory=list)
 
     # Async callbacks for mutating state ----------------------------------
     update_config: Callable[[dict[str, Any]], Awaitable[None]] | None = None
@@ -242,9 +247,10 @@ class DashboardServer:
         return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
     async def _handle_status(self, _request: web.Request) -> web.Response:
-        """GET /api/status -- bot runtime status."""
+        """GET /api/status -- bot runtime status + account summary."""
         state = self._state
         uptime = time.time() - state.started_at
+        acct = state.account_summary
 
         return _json_response(
             {
@@ -252,28 +258,31 @@ class DashboardServer:
                 "dry_run": state.dry_run,
                 "testnet": state.config.hl_testnet,
                 "uptime_seconds": round(uptime, 1),
+                "uptime_ms": round(uptime * 1000),
                 "account_address": state.config.hl_account_address,
                 "scan_interval": state.config.scanner.scan_interval_seconds,
                 "subscribed_coins": sorted(state.subscribed_coins),
+                "scanned_coins": len(state.subscribed_coins),
                 "candle_store_depths": state.candle_store.snapshot_depths(),
+                # Account data from Hyperliquid
+                "balance": acct.get("account_value"),
+                "withdrawable": acct.get("withdrawable"),
+                "total_margin_used": acct.get("total_margin_used"),
+                "total_ntl_pos": acct.get("total_ntl_pos"),
+                "total_raw_usd": acct.get("total_raw_usd"),
+                "open_positions": len(state.hl_positions),
+                "open_orders_count": len(state.open_orders),
             }
         )
 
     async def _handle_positions(self, _request: web.Request) -> web.Response:
-        """GET /api/positions -- open positions with unrealized PnL."""
-        from src.strategy.models import PositionStatus
-
-        open_positions = [
-            pos
-            for pos in self._state.positions.values()
-            if pos.status == PositionStatus.OPEN
-        ]
-        serialized = [_position_to_dict(p) for p in open_positions]
-        total_pnl = sum(p.unrealized_pnl for p in open_positions)
+        """GET /api/positions -- Hyperliquid positions from clearinghouseState."""
+        hl_pos = self._state.hl_positions
+        total_pnl = sum(p.get("unrealized_pnl", 0) for p in hl_pos)
 
         return _json_response(
             {
-                "positions": serialized,
+                "positions": hl_pos,
                 "total_unrealized_pnl": round(total_pnl, 4),
             }
         )
@@ -287,18 +296,21 @@ class DashboardServer:
         return _json_response({"fills": list(self._state.recent_fills)})
 
     async def _handle_history(self, _request: web.Request) -> web.Response:
-        """GET /api/history -- closed position history with aggregate stats."""
-        closed = self._state.closed_positions
-        serialized = [_position_to_dict(p) for p in closed]
-        total_pnl = sum(p.pnl for p in closed)
-        wins = sum(1 for p in closed if p.pnl >= 0)
-        total = len(closed)
+        """GET /api/history -- recent fills with realized PnL."""
+        fills = self._state.recent_fills
+        # Compute aggregate stats from fills with closed PnL
+        closed_fills = [f for f in fills if f.get("closed_pnl", 0) != 0]
+        total_pnl = sum(f.get("closed_pnl", 0) for f in closed_fills)
+        wins = sum(1 for f in closed_fills if f.get("closed_pnl", 0) > 0)
+        total = len(closed_fills)
         win_rate = round((wins / total * 100), 1) if total > 0 else 0.0
+        total_fees = sum(f.get("fee", 0) for f in fills)
 
         return _json_response(
             {
-                "history": serialized,
+                "fills": fills,
                 "total_realized_pnl": round(total_pnl, 4),
+                "total_fees": round(total_fees, 4),
                 "win_rate": win_rate,
                 "total_trades": total,
             }
