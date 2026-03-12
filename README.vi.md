@@ -156,6 +156,7 @@ Hyperliquid WebSocket (trades)
 | `LINKED` | Được nạp tiền bởi suspect đã biết (cluster) |
 | `LB_COIN` | Ví leaderboard trade coin bất thường |
 | `VOL_SPIKE` | Volume 24h > 3× EMA baseline (ngày tin tức/sự kiện, ít nghi ngờ hơn) |
+| `NEW_LIST` | Coin xuất hiện trên thị trường < 48h trước (listing mới phát hiện sau khi scanner khởi động) |
 
 ### Filter MM/HFT
 
@@ -194,6 +195,10 @@ Khi kiểm tra ledger của một ví, `inspectTrader()` quét tất cả các e
 ### Volume EMA Baseline
 
 Volume 24h của mỗi coin được theo dõi dưới dạng đường trung bình động lũy thừa (EMA, α = 0.1, cập nhật mỗi ~60 giây). Khi volume hôm nay vượt 3× EMA baseline, coin nhận flag `VOL_SPIKE` và `scoreC` giảm 3 điểm (ngày tin tức/sự kiện → giao dịch insider ít bất thường hơn). Khi volume thấp hơn 0.5× EMA (thị trường yên tĩnh), `scoreC` tăng +2 (giao dịch nổi bật hơn). Cần ít nhất 10 mẫu EMA (~10 phút) trước khi kích hoạt.
+
+### Phát hiện New Listing
+
+`InsiderDetectorService` theo dõi khi nào mỗi coin xuất hiện lần đầu trong `refreshCoinTiers()`. Tất cả coin có mặt khi scanner khởi động được đánh dấu là baseline (không flag). Bất kỳ coin nào xuất hiện sau khi khởi động nhận flag `NEW_LISTING` và tăng `scoreC` +8 trong cửa sổ 48 giờ. Điều này bắt được pattern cổ điển: insiders mua một perpetual listing mới trước khi thông báo công khai.
 
 ### FP Digest Hàng Ngày
 

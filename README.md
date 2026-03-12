@@ -156,6 +156,7 @@ Composite score **(A + B + C + D + E) × F + G**, capped at 100:
 | `LINKED` | Funded by a known suspect (cluster) |
 | `LB_COIN` | Leaderboard wallet trading unusual coin |
 | `VOL_SPIKE` | 24h volume > 3× EMA baseline (news/event day, less suspicious) |
+| `NEW_LIST` | Coin appeared in market < 48h ago (post-startup new listing) |
 
 ### MM/HFT Filter
 
@@ -194,6 +195,10 @@ When inspecting a wallet's ledger, `inspectTrader()` scans all `send`-type entri
 ### Volume EMA Baseline
 
 Each coin's 24h notional volume is tracked as an exponential moving average (α = 0.1, updated every ~60 s). When today's volume exceeds 3× the EMA baseline, the coin receives a `VOL_SPIKE` flag and `scoreC` is reduced by 3 points (news/event day → insider trades are less anomalous). When volume is below 0.5× EMA (quiet market), `scoreC` gains +2 (trade stands out more). Requires 10 EMA samples (~10 min) before activating.
+
+### New Listing Detection
+
+`InsiderDetectorService` tracks when each coin first appears in `refreshCoinTiers()`. All coins present at scanner startup are marked as baseline (no flag). Any coin appearing after startup receives the `NEW_LISTING` flag and a `scoreC` boost of +8 for a 48-hour window. This catches the classic pattern of insiders buying a new perpetual listing before public announcement.
 
 ### Daily FP Digest
 

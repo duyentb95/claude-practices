@@ -23,6 +23,7 @@ export enum InsiderFlag {
   DEAD_MARKET    = 'DEAD_MKT',   // Trade on coin with nearly-zero 24h volume
   HIGH_OI_RATIO  = 'HIGH_OI',    // Trade notional > 10% of coin's open interest
   VOLUME_SPIKE   = 'VOL_SPIKE',  // Today's 24h volume > 3× EMA baseline (news/event day → less suspicious)
+  NEW_LISTING    = 'NEW_LIST',   // Coin appeared in allPerpMetas < 48h ago (post-startup detection)
 
   // Noise filter flags (skipped from suspect list)
   HFT_PATTERN    = 'HFT',      // userAddRate <= 0 via Copin API → market maker / HFT, skip inspection

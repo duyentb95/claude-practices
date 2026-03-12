@@ -133,6 +133,16 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   private static readonly VOLUME_EMA_ALPHA = 0.1;
   private static readonly VOLUME_EMA_MIN_SAMPLES = 10;
 
+  /**
+   * Tracks when each coin was first seen in refreshCoinTiers().
+   * Coins present at startup → stored as 0 (baseline, no flag).
+   * Coins appearing after startup → stored as Date.now() (newly listed).
+   * Used in scoreTrader() to add NEW_LISTING flag + scoreC +8 for < 48h coins.
+   */
+  private readonly coinFirstSeenAt = new Map<string, number>();
+  private isFirstTierRefresh = true;
+  private static readonly NEW_LISTING_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours
+
   /** Log messages for the terminal / web UI */
   readonly logs: string[] = [];
 
@@ -211,7 +221,21 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
             });
           }
         }
+
+        // New listing detection: track when each coin first appears
+        if (!this.coinFirstSeenAt.has(coin)) {
+          if (this.isFirstTierRefresh) {
+            // Baseline: coins present at startup are marked as "pre-existing"
+            this.coinFirstSeenAt.set(coin, 0);
+          } else {
+            // New coin appeared after startup — record as freshly listed
+            this.coinFirstSeenAt.set(coin, Date.now());
+            this.addLog(`[NEW LISTING] ${coin} appeared — monitoring for insider activity (48h window)`);
+            this.logger.warn(`New listing detected: ${coin}`);
+          }
+        }
       }
+      if (this.isFirstTierRefresh) this.isFirstTierRefresh = false;
     } catch (e) {
       this.logger.warn(`refreshCoinTiers failed: ${e.message}`);
     }
@@ -632,9 +656,15 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
     // ── Win rate (90d) — chronic losers are not acting on information edge ───
     const closedFills = fills90d.filter(f => parseFloat(f.closedPnl ?? '0') !== 0);
-    const winRate = closedFills.length >= 10
+    const hlWinRate = closedFills.length >= 10
       ? fills90d.filter(f => parseFloat(f.closedPnl ?? '0') > 0).length / closedFills.length
-      : null; // insufficient data — skip
+      : null; // insufficient HL data
+
+    // Copin fallback: use D30 winRate when HL fills are insufficient (fresh wallet / new account)
+    const winRate: number | null = hlWinRate ??
+      (copinClass.d30 && copinClass.d30.totalTrade >= 10
+        ? copinClass.d30.winRate / 100
+        : null);
 
     if (winRate !== null) {
       if      (winRate < 0.20) scoreB -= 8;
@@ -694,6 +724,13 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
           // Unusually quiet day → large trade stands out more → increase suspicion
           scoreC = Math.min(20, scoreC + 2);
         }
+      }
+
+      // New listing boost: coin appeared after scanner startup < 48h ago
+      const coinFirstSeen = this.coinFirstSeenAt.get(trade.coin) ?? 0;
+      if (coinFirstSeen > 0 && Date.now() - coinFirstSeen < InsiderDetectorService.NEW_LISTING_WINDOW_MS) {
+        scoreC = Math.min(20, scoreC + 8);
+        extraFlags.push(InsiderFlag.NEW_LISTING);
       }
 
       scoreC = Math.min(20, scoreC);

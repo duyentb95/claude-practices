@@ -444,6 +444,7 @@ function flagLabel(f: InsiderFlag): string {
     case InsiderFlag.DEAD_MARKET:     return '💀 DEAD MKT';
     case InsiderFlag.HIGH_OI_RATIO:   return '📊 HIGH OI';
     case InsiderFlag.VOLUME_SPIKE:    return '📣 VOL SPIKE';
+    case InsiderFlag.NEW_LISTING:     return '🆕 NEW LIST';
     case InsiderFlag.COPIN_SUSPICIOUS: return '🎯 COPIN SUSP';
     case InsiderFlag.SMART_TRADER:    return '🧠 SMART';
     case InsiderFlag.LINKED_SUSPECT:  return '🔗 LINKED';

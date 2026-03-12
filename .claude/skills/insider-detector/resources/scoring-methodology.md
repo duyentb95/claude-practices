@@ -74,9 +74,14 @@ else if (fillCount <= 30)   scoreB += 2;
 ### Win rate (90-day closed positions)
 ```typescript
 const closedFills = fills90d.filter(f => parseFloat(f.closedPnl ?? '0') !== 0);
-const winRate = closedFills.length >= 10
+const hlWinRate = closedFills.length >= 10
   ? fills90d.filter(f => parseFloat(f.closedPnl ?? '0') > 0).length / closedFills.length
-  : null; // skip if < 10 data points
+  : null; // insufficient HL data
+
+// Copin fallback (Phase 3): use D30 winRate when HL fills are insufficient
+const winRate = hlWinRate ?? (copinClass.d30?.totalTrade >= 10
+  ? copinClass.d30.winRate / 100
+  : null);
 
 if (winRate !== null) {
   if      (winRate < 0.20) scoreB -= 8;
@@ -148,6 +153,13 @@ if (volEma && volEma.sampleCount >= 10 && volEma.ema > 0) {
   } else if (volumeRatio < 0.5) {
     scoreC = Math.min(20, scoreC + 2); // quiet market — trade stands out more
   }
+}
+
+// New listing boost (Phase 3): coin appeared after scanner startup < 48h ago
+// coinFirstSeenAt = 0 for baseline coins; > 0 only for post-startup detections
+const coinFirstSeen = coinFirstSeenAt.get(trade.coin) ?? 0;
+if (coinFirstSeen > 0 && Date.now() - coinFirstSeen < 48 * 60 * 60 * 1000) {
+  scoreC = Math.min(20, scoreC + 8);  // flag NEW_LISTING
 }
 
 scoreC = Math.min(20, scoreC);

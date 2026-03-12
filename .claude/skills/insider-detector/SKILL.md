@@ -1,6 +1,6 @@
 ---
 name: insider-detector
-version: 3.2.0
+version: 3.3.0
 description: >
   Detect insider trading patterns on Hyperliquid perpetuals.
   Trigger when asked to investigate a wallet, token, or suspicious large trade.
@@ -28,6 +28,8 @@ classify alert level, and generate a structured Markdown report.
 - **Leaderboard monitoring** — tracks top-100 Copin traders; alerts when they trade unusual coins (LB_COIN flag)
 - **HIP-3 coverage** — subscribes to all DEX pair trades via `dex: 'ALL_DEXS'`; uses `allPerpMetas` for coin list
 - **Volume EMA baseline** — per-coin EMA (α=0.1) of 24h volume; VOLUME_SPIKE flag reduces scoreC when news/event inflates volume
+- **New listing detection** — tracks coins appearing after startup; NEW_LISTING flag + scoreC +8 for 48h window
+- **Copin win rate fallback** — uses Copin D30 winRate in scoreB when HL fills < 10 closed positions
 - **Daily FP digest** — daily Lark card (configurable UTC hour) listing HIGH/CRITICAL suspects with FP indicators for operator review
 - **Paginated fills** — up to 10 000 most recent aggregated orders per wallet
 - **All-time PnL signal** — profitable wallets score higher (informed trader indicator)

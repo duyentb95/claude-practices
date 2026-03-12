@@ -4,6 +4,16 @@ All notable changes to this skill. Format: [semver] - YYYY-MM-DD
 
 ---
 
+## [3.3.0] - 2026-03-12
+
+### Added
+- **Phase 3: New Listing Detection** — `coinFirstSeenAt` map tracks when each coin first appears in `refreshCoinTiers()`. Coins at startup marked as baseline (no flag). Coins appearing after startup trigger `NEW_LISTING` flag + scoreC +8 for 48h window. Log message on detection.
+- **Phase 3: Copin win rate fallback in scoreB** — when HL 90d fills have < 10 closed positions (insufficient data), falls back to Copin D30 `winRate` if D30 has ≥ 10 trades. Improves accuracy for wallets with limited HL history.
+- **InsiderFlag.NEW_LISTING ('NEW_LIST')** — emitted when trade coin appeared in `metaAndAssetCtxs` < 48h after scanner startup.
+- **Lark flag label** for `NEW_LISTING` (🆕 NEW LIST).
+
+---
+
 ## [3.2.0] - 2026-03-12
 
 ### Added
