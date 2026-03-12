@@ -144,33 +144,29 @@ class MarketScanner:
                 "direction": "LONG" if day_change > 0 else "SHORT",
             })
 
+        # Count movers for debug
+        n_pos = sum(1 for c in candidates if c["change_24h"] > 0)
+        n_neg = sum(1 for c in candidates if c["change_24h"] < 0)
+        n_flat = sum(1 for c in candidates if c["change_24h"] == 0)
+
         self._emit(
             "FILTER",
             f"{len(candidates)} pass volume filter (>{_fmt_usd(self._min_vol)}), "
-            f"skipped: {skipped_vol} low-vol, {skipped_delisted} delisted",
+            f"skipped: {skipped_vol} low-vol, {skipped_delisted} delisted | "
+            f"gainers:{n_pos} losers:{n_neg} flat:{n_flat}",
         )
 
         if not candidates:
             self._emit("SCAN", "No candidates after filtering")
             return []
 
-        # Sort by absolute change
+        # Sort all by absolute 24h change
         candidates.sort(key=lambda c: abs(c["change_24h"]), reverse=True)
 
-        # Top gainers
-        gainers = sorted(
-            [c for c in candidates if c["change_24h"] > 0],
-            key=lambda c: c["change_24h"],
-            reverse=True,
-        )[:self._top_n]
+        # Separate gainers / losers for display
+        gainers = [c for c in candidates if c["change_24h"] > 0]
+        losers = [c for c in candidates if c["change_24h"] < 0]
 
-        # Top losers
-        losers = sorted(
-            [c for c in candidates if c["change_24h"] < 0],
-            key=lambda c: c["change_24h"],
-        )[:self._top_n]
-
-        # Emit top movers
         if gainers:
             g_str = ", ".join(
                 f"{c['coin']} +{c['change_24h']:.1f}%" for c in gainers[:5]
@@ -183,8 +179,14 @@ class MarketScanner:
             )
             self._emit("MOVERS", f"Top losers: {l_str}")
 
-        # Evaluate each top candidate
-        top_candidates = (gainers + losers)[:self._top_n * 2]
+        if not gainers and not losers:
+            # Show top by volume if no movers
+            by_vol = sorted(candidates, key=lambda c: c["volume_24h"], reverse=True)[:5]
+            v_str = ", ".join(f"{c['coin']} {_fmt_usd(c['volume_24h'])}" for c in by_vol)
+            self._emit("MOVERS", f"Top by volume: {v_str}")
+
+        # Take top N by absolute change for detailed evaluation
+        top_candidates = candidates[:self._top_n * 2]
         for c in top_candidates:
             vol_score = min(c["volume_24h"] / 50_000_000, 1.0)  # normalize to 50M
             momentum_score = min(abs(c["change_24h"]) / 10.0, 1.0)  # normalize to 10%

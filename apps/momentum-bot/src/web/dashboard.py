@@ -945,9 +945,8 @@ function updateScanner(data) {
     empty.style.display = 'block';
   } else {
     empty.style.display = 'none';
-    /* Show newest at bottom (events come newest-first from API, reverse) */
-    var reversed = events.slice().reverse();
-    terminal.innerHTML = reversed.map(function(e) {
+    /* Newest on top (API already returns newest-first) */
+    terminal.innerHTML = events.map(function(e) {
       var tag = e.tag || 'INFO';
       return '<div class="scan-line scan-line-' + tag + '">'
         + '<span class="scan-time">' + (e.ts || '') + '</span>'
@@ -955,8 +954,6 @@ function updateScanner(data) {
         + '<span class="scan-msg">' + (e.msg || '') + '</span>'
         + '</div>';
     }).join('');
-    /* Auto-scroll to bottom */
-    terminal.scrollTop = terminal.scrollHeight;
   }
 }
 
