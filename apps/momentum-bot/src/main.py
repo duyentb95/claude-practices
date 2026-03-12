@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import signal
 import time
 from pathlib import Path
@@ -21,6 +22,7 @@ from src.alerts.telegram import TelegramAlerter
 from src.config import AppConfig, load_config
 from src.data.candle_store import CandleStore
 from src.data.hl_info import HyperliquidInfoPoller
+from src.data.market_scanner import MarketScanner
 from src.strategy.models import (
     ManagedPosition,
     PositionStatus,
@@ -64,6 +66,16 @@ class MomentumBot:
 
         # Subscribed coins for candle data.
         self._subscribed_coins: set[str] = set()
+
+        # Scanner terminal events (shared ring buffer).
+        self._scanner_events: collections.deque = collections.deque(maxlen=300)
+
+        # Market scanner.
+        self._market_scanner = MarketScanner(
+            scanner_events=self._scanner_events,
+            min_24h_volume_usd=float(config.scanner.min_24h_volume_usd),
+            top_n=config.scanner.top_n_candidates,
+        )
 
         # Shared containers for Hyperliquid live data.
         self._account_summary: dict[str, Any] = {}
@@ -124,6 +136,7 @@ class MomentumBot:
             open_orders=self._open_orders,
             recent_fills=self._recent_fills,
             historical_orders=self._historical_orders,
+            scanner_events=self._scanner_events,
             update_config=self._apply_config_update,
             emergency_close=self._emergency_close_all,
         )
@@ -199,44 +212,19 @@ class MomentumBot:
         """Execute a single scan cycle.
 
         Steps:
-        1. Identify candidate coins from screening criteria.
-        2. For each coin with enough candle data, run the strategy.
-        3. Process any generated signals.
+        1. Fetch market data via MarketScanner (metaAndAssetCtxs).
+        2. Screen and rank coins by momentum, volume, OI.
+        3. Emit structured events for the scanner terminal.
         """
-        coins_with_data = [
-            coin
-            for coin in self.candle_store.get_coins()
-            if self.candle_store.has_enough_data(
-                coin, self.config.strategy.staircase.min_lookback_candles
+        try:
+            candidates = await self._market_scanner.run_scan()
+            log.info(
+                "scan_cycle",
+                candidates=len(candidates),
+                open_positions=len(self._positions),
             )
-        ]
-
-        log.info(
-            "scan_cycle",
-            coins_scanned=len(coins_with_data),
-            open_positions=len(self._positions),
-        )
-
-        for coin in coins_with_data:
-            if coin in self._positions:
-                continue  # Already have a position in this coin.
-
-            candles = self.candle_store.get_candles(
-                coin, count=self.config.strategy.staircase.min_lookback_candles
-            )
-
-            if not candles:
-                continue
-
-            # Strategy evaluation would go here -- for now, log that we
-            # checked the coin.  Concrete strategy integration is done
-            # once the screener and regime detectors are wired in.
-            log.debug(
-                "coin_evaluated",
-                coin=coin,
-                candle_count=len(candles),
-                latest_close=candles[-1].close,
-            )
+        except Exception:
+            log.exception("market_scanner_error")
 
     # ------------------------------------------------------------------
     # Signal handling

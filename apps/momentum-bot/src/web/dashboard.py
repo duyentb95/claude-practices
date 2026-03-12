@@ -244,6 +244,31 @@ tr:hover td { background:var(--bg-hover); }
   font-size:13px;
 }
 
+/* ===== SCANNER TERMINAL ===== */
+.scanner-terminal {
+  max-height:400px; overflow-y:auto; padding:8px 0;
+  font-size:12px; line-height:1.7;
+  background:var(--bg-page);
+}
+.scan-line {
+  padding:2px 16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.scan-line:hover { background:var(--bg-hover); white-space:normal; }
+.scan-time { color:var(--text-muted); margin-right:6px; }
+.scan-tag { font-weight:700; margin-right:6px; display:inline-block; min-width:56px; }
+.scan-tag-SCAN { color:var(--accent); }
+.scan-tag-FETCH { color:var(--text-muted); }
+.scan-tag-FILTER { color:var(--text-secondary); }
+.scan-tag-MOVERS { color:#B794F4; }
+.scan-tag-EVAL { color:var(--warning); }
+.scan-tag-SIGNAL { color:var(--profit); font-weight:700; }
+.scan-tag-WATCH { color:#FBD38D; }
+.scan-tag-SKIP { color:var(--text-muted); }
+.scan-tag-ERROR { color:var(--loss); }
+.scan-msg { color:var(--text-secondary); }
+.scan-line-SIGNAL { background:rgba(56,208,96,0.05); }
+.scan-line-ERROR { background:rgba(250,85,71,0.05); }
+
 /* ===== ACTIVITY LOGS ===== */
 .log-controls {
   display:flex; gap:8px; align-items:center; padding:10px 16px;
@@ -396,19 +421,11 @@ tr:hover td { background:var(--bg-hover); }
       <div class="empty-state" id="dash-positions-empty">No open positions</div>
     </div>
 
-    <!-- Recent Signals -->
+    <!-- Scanner Terminal -->
     <div class="table-wrap">
-      <div class="table-title">Recent Signals</div>
-      <div class="signals-list">
-        <div class="signal-row signal-header">
-          <span>Time</span><span>Coin</span><span>Direction</span>
-          <span>Score</span><span class="text-right">Entry</span>
-          <span class="text-right">SL</span><span class="text-right">TP</span>
-          <span class="text-right">R:R</span><span>Status</span>
-        </div>
-        <div id="dash-signals-body"></div>
-      </div>
-      <div class="empty-state" id="dash-signals-empty">No recent signals</div>
+      <div class="table-title">Scanner Terminal <span class="text-muted" id="scanner-status" style="font-weight:400;font-size:11px;margin-left:8px;"></span></div>
+      <div class="scanner-terminal" id="scanner-terminal"></div>
+      <div class="empty-state" id="scanner-empty">Waiting for first scan cycle...</div>
     </div>
 
     <!-- Activity Logs (compact, last 30) -->
@@ -803,7 +820,7 @@ function fetchJson(url) {
 function pollAll() {
   fetchJson('/api/status').then(updateStatus).catch(function(){});
   fetchJson('/api/positions').then(updatePositions).catch(function(){});
-  fetchJson('/api/signals').then(updateSignals).catch(function(){});
+  fetchJson('/api/scanner?limit=100').then(updateScanner).catch(function(){});
   fetchJson('/api/logs?limit=200').then(updateLogs).catch(function(){});
   fetchJson('/api/orders').then(updateOrders).catch(function(){});
   fetchJson('/api/fills').then(updateFillsTab).catch(function(){});
@@ -913,29 +930,33 @@ function updatePositions(data) {
   }
 }
 
-/* ===== UPDATE: SIGNALS ===== */
-function updateSignals(data) {
-  var signals = Array.isArray(data) ? data : (data.signals || []);
-  var body = document.getElementById('dash-signals-body');
-  var empty = document.getElementById('dash-signals-empty');
-  if (signals.length === 0) {
-    body.innerHTML = '';
+/* ===== UPDATE: SCANNER TERMINAL ===== */
+function updateScanner(data) {
+  var events = data.events || [];
+  var total = data.total || 0;
+  var terminal = document.getElementById('scanner-terminal');
+  var empty = document.getElementById('scanner-empty');
+  var status = document.getElementById('scanner-status');
+
+  status.textContent = total + ' events';
+
+  if (events.length === 0) {
+    terminal.innerHTML = '';
     empty.style.display = 'block';
   } else {
     empty.style.display = 'none';
-    body.innerHTML = signals.map(function(s) {
-      return '<div class="signal-row">'
-        + '<span class="text-muted">' + fmtRelative(s.time) + '</span>'
-        + '<span>' + (s.coin || '--') + '</span>'
-        + '<span>' + dirBadge(s.direction) + '</span>'
-        + '<span>' + (s.score != null ? s.score : '--') + '</span>'
-        + '<span class="text-right">' + fmtPrice(s.entry) + '</span>'
-        + '<span class="text-right">' + fmtPrice(s.sl) + '</span>'
-        + '<span class="text-right">' + fmtPrice(s.tp) + '</span>'
-        + '<span class="text-right">' + (s.rr != null ? s.rr.toFixed(1) : '--') + '</span>'
-        + '<span>' + statusBadge(s.status) + '</span>'
+    /* Show newest at bottom (events come newest-first from API, reverse) */
+    var reversed = events.slice().reverse();
+    terminal.innerHTML = reversed.map(function(e) {
+      var tag = e.tag || 'INFO';
+      return '<div class="scan-line scan-line-' + tag + '">'
+        + '<span class="scan-time">' + (e.ts || '') + '</span>'
+        + '<span class="scan-tag scan-tag-' + tag + '">[' + tag + ']</span>'
+        + '<span class="scan-msg">' + (e.msg || '') + '</span>'
         + '</div>';
     }).join('');
+    /* Auto-scroll to bottom */
+    terminal.scrollTop = terminal.scrollHeight;
   }
 }
 

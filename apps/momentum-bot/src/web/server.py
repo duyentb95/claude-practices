@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import time
@@ -51,6 +52,9 @@ class BotState:
     open_orders: list[dict[str, Any]] = field(default_factory=list)
     recent_fills: list[dict[str, Any]] = field(default_factory=list)
     historical_orders: list[dict[str, Any]] = field(default_factory=list)
+
+    # Scanner terminal events (populated by MarketScanner)
+    scanner_events: collections.deque = field(default_factory=lambda: collections.deque(maxlen=300))
 
     # Async callbacks for mutating state ----------------------------------
     update_config: Callable[[dict[str, Any]], Awaitable[None]] | None = None
@@ -205,6 +209,7 @@ class DashboardServer:
         self._app.router.add_get("/api/fills", self._handle_fills)
         self._app.router.add_get("/api/history", self._handle_history)
         self._app.router.add_get("/api/signals", self._handle_signals)
+        self._app.router.add_get("/api/scanner", self._handle_scanner)
         self._app.router.add_get("/api/logs", self._handle_logs)
         self._app.router.add_get("/api/config", self._handle_get_config)
         self._app.router.add_post("/api/config", self._handle_update_config)
@@ -322,6 +327,14 @@ class DashboardServer:
         return _json_response(
             {"signals": [_signal_to_dict(s) for s in reversed(recent)]}
         )
+
+    async def _handle_scanner(self, request: web.Request) -> web.Response:
+        """GET /api/scanner -- scanner terminal events."""
+        limit = int(request.query.get("limit", "100"))
+        events = list(self._state.scanner_events)
+        # newest first
+        events = list(reversed(events[-limit:]))
+        return _json_response({"events": events, "total": len(self._state.scanner_events)})
 
     async def _handle_logs(self, request: web.Request) -> web.Response:
         """GET /api/logs -- recent activity logs from the ring buffer."""
