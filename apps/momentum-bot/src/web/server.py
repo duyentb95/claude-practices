@@ -160,7 +160,9 @@ class DashboardServer:
 
     def __init__(self, state: BotState, port: int | None = None) -> None:
         self._state = state
-        self._port = port or int(os.getenv("DASHBOARD_PORT", str(DEFAULT_PORT)))
+        self._port = port or int(
+            os.getenv("DASHBOARD_PORT") or os.getenv("PORT") or str(DEFAULT_PORT)
+        )
         self._app = web.Application(middlewares=[self._error_middleware])
         self._runner: web.AppRunner | None = None
         self._setup_routes()
