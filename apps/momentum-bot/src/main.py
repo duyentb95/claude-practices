@@ -23,9 +23,11 @@ from src.alerts.telegram import TelegramAlerter
 from src.config import AppConfig, load_config
 from src.data.candle_pipeline import CandlePipelineManager
 from src.data.candle_store import CandleStore
+from src.data.cvd_tracker import CVDTracker
 from src.data.feeder import HyperliquidFeeder
 from src.data.hl_info import HyperliquidInfoPoller
 from src.data.market_scanner import MarketScanner
+from src.data.orderbook import OrderbookTracker
 from src.execution.executor import HyperliquidExecutor
 from src.execution.risk_mgr import RiskManager
 from src.strategy.models import (
@@ -35,6 +37,7 @@ from src.strategy.models import (
     SignalDirection,
 )
 from src.utils.logger import get_logger, setup_logging
+from src.utils.rate_limiter import HyperliquidRateLimiter
 from src.web.server import BotState, DashboardServer
 
 log = get_logger(__name__)
@@ -53,6 +56,7 @@ class MomentumBot:
         self._running = False
 
         # Core components.
+        self.rate_limiter = HyperliquidRateLimiter()
         self.candle_store = CandleStore(max_candles=1500)
 
         # Alert channels.
@@ -82,6 +86,14 @@ class MomentumBot:
             ws_url=ws_url,
         )
 
+        # CVD tracker: accumulates buy/sell volume from WS trades.
+        self._cvd_tracker = CVDTracker()
+        self._feeder.on("trades", self._cvd_tracker.on_trades)
+
+        # Orderbook tracker: processes WS l2Book updates.
+        self._orderbook_tracker = OrderbookTracker()
+        self._feeder.on("l2Book", self._orderbook_tracker.on_l2book)
+
         # Candle pipeline: connects scanner → WS candles → strategy signals.
         self._candle_pipeline = CandlePipelineManager(
             feeder=self._feeder,
@@ -91,6 +103,9 @@ class MomentumBot:
             max_subs=config.scanner.max_ws_subscriptions,
             min_candles=config.strategy.staircase.min_lookback_candles,
             bootstrap_count=config.scanner.candle_bootstrap_count,
+            rate_limiter=self.rate_limiter,
+            cvd_tracker=self._cvd_tracker,
+            orderbook_tracker=self._orderbook_tracker,
         )
 
         # Market scanner.
@@ -98,6 +113,7 @@ class MomentumBot:
             scanner_events=self._scanner_events,
             min_24h_volume_usd=float(config.scanner.min_24h_volume_usd),
             top_n=config.scanner.top_n_candidates,
+            rate_limiter=self.rate_limiter,
         )
 
         # Shared containers for Hyperliquid live data.
@@ -115,6 +131,7 @@ class MomentumBot:
             open_orders=self._open_orders,
             recent_fills=self._recent_fills,
             historical_orders=self._historical_orders,
+            rate_limiter=self.rate_limiter,
         )
 
         # Execution layer (only when credentials available and not dry-run).
@@ -450,13 +467,22 @@ class MomentumBot:
         )
 
         try:
-            # 1. Entry order (market)
-            entry_result = await self._executor.place_market_order(
-                coin=signal_obj.coin,
-                is_buy=is_buy,
-                size=size,
-            )
-            log.info("entry_order_placed", coin=signal_obj.coin, result=entry_result)
+            # 1. Entry order (market or limit based on signal)
+            if signal_obj.order_type.value == "LIMIT":
+                entry_result = await self._executor.place_limit_order(
+                    coin=signal_obj.coin,
+                    is_buy=is_buy,
+                    size=size,
+                    price=signal_obj.entry_price,
+                )
+                log.info("entry_limit_placed", coin=signal_obj.coin, result=entry_result)
+            else:
+                entry_result = await self._executor.place_market_order(
+                    coin=signal_obj.coin,
+                    is_buy=is_buy,
+                    size=size,
+                )
+                log.info("entry_market_placed", coin=signal_obj.coin, result=entry_result)
 
             # 2. Stop-loss (reduce-only trigger)
             close_is_buy = not is_buy

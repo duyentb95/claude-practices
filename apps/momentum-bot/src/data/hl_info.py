@@ -11,11 +11,14 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
 from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.utils.rate_limiter import HyperliquidRateLimiter
 
 log = get_logger(__name__)
 
@@ -42,6 +45,7 @@ class HyperliquidInfoPoller:
         open_orders: list[dict[str, Any]],
         recent_fills: list[dict[str, Any]],
         historical_orders: list[dict[str, Any]],
+        rate_limiter: HyperliquidRateLimiter | None = None,
     ) -> None:
         self._address = account_address
         self._account_summary = account_summary
@@ -49,13 +53,16 @@ class HyperliquidInfoPoller:
         self._open_orders = open_orders
         self._recent_fills = recent_fills
         self._historical_orders = historical_orders
+        self._rate_limiter = rate_limiter
         self._session: aiohttp.ClientSession | None = None
         self._running = False
 
     async def _post_info(self, payload: dict[str, Any]) -> Any:
-        """POST /info with the given payload. Returns parsed JSON."""
+        """POST /info with rate limiting. Returns parsed JSON."""
         if self._session is None:
             self._session = aiohttp.ClientSession()
+        if self._rate_limiter:
+            return await self._rate_limiter.post_info(self._session, INFO_ENDPOINT, payload, timeout=10)
         try:
             async with self._session.post(
                 INFO_ENDPOINT,

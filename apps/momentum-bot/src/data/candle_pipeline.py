@@ -12,7 +12,7 @@ from __future__ import annotations
 import collections
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -22,6 +22,11 @@ from src.data.feeder import HyperliquidFeeder
 from src.strategy.models import Signal
 from src.strategy.regime import classify_regime
 from src.strategy.signal import generate_signal
+
+if TYPE_CHECKING:
+    from src.data.cvd_tracker import CVDTracker
+    from src.data.orderbook import OrderbookTracker
+    from src.utils.rate_limiter import HyperliquidRateLimiter
 
 logger = structlog.get_logger(__name__)
 
@@ -49,6 +54,9 @@ class CandlePipelineManager:
         max_subs: int = 5,
         min_candles: int = 120,
         bootstrap_count: int = 200,
+        rate_limiter: HyperliquidRateLimiter | None = None,
+        cvd_tracker: CVDTracker | None = None,
+        orderbook_tracker: OrderbookTracker | None = None,
     ) -> None:
         self._feeder = feeder
         self._candle_store = candle_store
@@ -57,6 +65,9 @@ class CandlePipelineManager:
         self._max_subs = max_subs
         self._min_candles = min_candles
         self._bootstrap_count = bootstrap_count
+        self._rate_limiter = rate_limiter
+        self._cvd_tracker = cvd_tracker
+        self._orderbook_tracker = orderbook_tracker
 
         # Currently subscribed coins managed by this pipeline.
         self._subscribed: set[str] = set()
@@ -103,6 +114,10 @@ class CandlePipelineManager:
             await self._feeder.unsubscribe_coin(coin)
             self._subscribed.discard(coin)
             self._last_candle_ts.pop(coin, None)
+            if self._cvd_tracker:
+                self._cvd_tracker.remove_coin(coin)
+            if self._orderbook_tracker:
+                self._orderbook_tracker.remove_coin(coin)
             self._emit("UNSUB", f"Unsubscribed {coin} (no longer a candidate)")
 
         # Subscribe new coins (up to max_subs total).
@@ -130,15 +145,20 @@ class CandlePipelineManager:
             coin=coin,
             candle_store=self._candle_store,
             count=self._bootstrap_count,
+            rate_limiter=self._rate_limiter,
         )
         self._emit(
             "BOOTSTRAP",
             f"{coin}: loaded {loaded} historical candles",
         )
 
-        # Subscribe to live WS candle feed.
+        # Subscribe to live WS candle feed (candle + trades + l2Book).
         await self._feeder.subscribe_coin(coin)
         self._subscribed.add(coin)
+
+        # Initialize CVD tracking for this coin.
+        if self._cvd_tracker:
+            self._cvd_tracker.get_or_create(coin)
 
         # Immediately evaluate regime for terminal visibility.
         candles = self._candle_store.get_candles(coin, self._min_candles)
@@ -193,6 +213,17 @@ class CandlePipelineManager:
         signal = generate_signal(coin, candles)
 
         if signal is not None:
+            # Enrich signal with CVD and orderbook quality data.
+            self._enrich_signal(signal)
+
+            # CVD divergence filter: reject signals where CVD diverges from price.
+            if signal.cvd_divergent:
+                self._emit(
+                    "FILTER",
+                    f"{coin} {signal.direction.value} REJECTED — CVD divergence detected",
+                )
+                return
+
             self._emit(
                 "SIGNAL",
                 f"{coin} {signal.direction.value} — "
@@ -200,9 +231,42 @@ class CandlePipelineManager:
                 f"SL={signal.stop_loss:.6g} "
                 f"TP={signal.take_profit:.6g} "
                 f"R:R={signal.rr_ratio:.2f} "
-                f"regime={signal.regime_score}/3",
+                f"regime={signal.regime_score}/3 "
+                f"order={signal.order_type.value} "
+                f"OB_imb={signal.orderbook_imbalance:+.2f} "
+                f"aggr={signal.aggressor_ratio:.2f}"
+                + (" CVD_OK" if signal.cvd_confirming else ""),
             )
             await self._on_signal(signal)
+
+    def _enrich_signal(self, signal: Signal) -> None:
+        """Populate CVD and orderbook fields on the signal."""
+        from src.strategy.models import SignalDirection
+
+        is_long = signal.direction == SignalDirection.LONG
+
+        # CVD enrichment
+        if self._cvd_tracker:
+            cvd_snap = self._cvd_tracker.get_snapshot(signal.coin)
+            if cvd_snap is not None:
+                signal.cvd_divergent = cvd_snap.is_divergent
+                signal.aggressor_ratio = cvd_snap.aggressor_ratio_5m
+                # CVD confirms if aggressors match direction
+                if is_long:
+                    signal.cvd_confirming = cvd_snap.aggressor_ratio_5m > 1.2
+                else:
+                    signal.cvd_confirming = cvd_snap.aggressor_ratio_5m < 0.8
+
+        # Orderbook enrichment
+        if self._orderbook_tracker:
+            ob_snap = self._orderbook_tracker.get_snapshot(signal.coin)
+            if ob_snap is not None:
+                signal.orderbook_imbalance = ob_snap.imbalance_1pct
+                # Boost confidence if orderbook supports direction
+                if is_long and ob_snap.imbalance_1pct > 0.2:
+                    signal.confidence += 10
+                elif not is_long and ob_snap.imbalance_1pct < -0.2:
+                    signal.confidence += 10
 
     # ------------------------------------------------------------------
     # Helpers

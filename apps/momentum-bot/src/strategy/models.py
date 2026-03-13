@@ -27,6 +27,11 @@ class SignalDirection(str, Enum):
     SHORT = "SHORT"
 
 
+class OrderType(str, Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+
+
 class ExitReason(str, Enum):
     STOP_LOSS = "STOP_LOSS"
     TAKE_PROFIT = "TAKE_PROFIT"
@@ -57,6 +62,12 @@ class Signal:
     staircase_score: float = 0.0
     volume_score: float = 0.0
     confidence: float = 0.0  # 0-100 composite confidence
+    order_type: OrderType = OrderType.MARKET  # limit vs market
+    # CVD / orderbook quality signals (populated by pipeline if available)
+    cvd_confirming: bool | None = None  # CVD direction matches trade direction
+    cvd_divergent: bool = False         # CVD diverging from price
+    orderbook_imbalance: float = 0.0    # -1 to +1, positive = bullish
+    aggressor_ratio: float = 1.0        # buy_vol / sell_vol (5m window)
 
     def __post_init__(self) -> None:
         risk = abs(self.entry_price - self.stop_loss)

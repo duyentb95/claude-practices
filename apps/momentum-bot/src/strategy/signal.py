@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from typing import Literal
 
-from .models import Candle, Signal, SignalDirection
+from .models import Candle, OrderType, Signal, SignalDirection
 from .regime import RegimeResult, classify_regime
 from .swing_points import (
     find_major_swing_high,
@@ -159,6 +159,9 @@ def generate_signal(
 
     signal_direction = SignalDirection.LONG if direction == "LONG" else SignalDirection.SHORT
 
+    # 8. Determine order type: LIMIT if SL distance < 3%, else MARKET
+    order_type = OrderType.LIMIT if sl_pct < _LIMIT_SL_PCT_THRESHOLD else OrderType.MARKET
+
     return Signal(
         coin=coin,
         direction=signal_direction,
@@ -170,4 +173,5 @@ def generate_signal(
         staircase_score=regime.staircase.score,
         volume_score=regime.volume.score,
         confidence=regime.staircase.score * 0.5 + regime.volume.score * 0.3 + (100.0 if regime.volatility_is_valid else 0.0) * 0.2,
+        order_type=order_type,
     )

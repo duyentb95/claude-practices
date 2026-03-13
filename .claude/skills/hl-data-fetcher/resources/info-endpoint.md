@@ -39,23 +39,35 @@ All perpetuals metadata + live market context. Use when you need market context 
 Coin `i` is shared between `meta.universe` and `ctxArray`. Does NOT include HIP-3 pairs.
 
 ### `l2Book`
-Order book snapshot.
+Order book snapshot. Returns up to 20 levels per side.
 ```json
-{ "type": "l2Book", "coin": "BTC", "nSigFigs": 5 }
-// Response: { "coin": "BTC", "time": ms, "levels": [[bids], [asks]] }
-// Each level: { "px": "95000", "sz": "0.5", "n": 3 }
+// Request (basic)
+{ "type": "l2Book", "coin": "BTC" }
+
+// Request (aggregated — nSigFigs: 2|3|4|5, mantissa: 1|2|5 only when nSigFigs=5)
+{ "type": "l2Book", "coin": "BTC", "nSigFigs": 5, "mantissa": 2 }
+
+// Response:
+{ "coin": "BTC", "time": 1754450974231, "levels": [
+    [{"px": "113377.0", "sz": "7.6699", "n": 17}, ...],  // bids
+    [{"px": "113397.0", "sz": "0.11543", "n": 3}, ...]   // asks
+]}
+// Each level: px (price), sz (aggregated size), n (number of orders at level)
 ```
+**Rate limit weight: 2** (lightweight endpoint).
 
 ### `candleSnapshot`
-OHLCV candles.
+OHLCV candles. Only the most recent 5000 candles available per query.
 ```json
 {
   "type": "candleSnapshot",
-  "req": { "coin": "BTC", "interval": "15m", "startTime": 1709500000000, "endTime": 1709600000000 }
+  "req": { "coin": "BTC", "interval": "1m", "startTime": 1709500000000, "endTime": 1709600000000 }
 }
-// Intervals: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d" | "3d" | "1w"
-// Each: { t (openMs), T (closeMs), s (coin), i (interval), o, h, l, c, v (base), n (tradeCount) }
+// Intervals: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d" | "3d" | "1w" | "1M"
+// HIP-3 pairs: prefix with dex name, e.g. "flx:OIL"
+// Response: [{ t (openMs), T (closeMs), s (coin), i (interval), o, h, l, c, v (base volume), n (tradeCount) }]
 ```
+**Rate limit weight: 20 + ⌈items/60⌉** (variable — 200 candles ≈ weight 24).
 
 ### `fundingHistory`
 Historical 8-hour funding rates.
@@ -233,3 +245,48 @@ Common errors:
 - `"User not found"` → address has no activity; treat as empty result
 - `429` → rate limited; back off 5–10s
 - Empty array `[]` → valid; address exists but no data in requested range
+
+---
+
+## Rate Limits (IP-Based)
+
+**Budget: 1200 weight/minute** (sliding window).
+
+### Endpoint Weights
+
+| Weight | Endpoints |
+|--------|-----------|
+| **2** | `l2Book`, `allMids`, `clearinghouseState`, `orderStatus`, `spotClearinghouseState`, `exchangeStatus` |
+| **20** | Most other info endpoints (`metaAndAssetCtxs`, `userFees`, `openOrders`, `frontendOpenOrders`, `userFunding`, `userNonFundingLedgerUpdates`, `leaderboard`, etc.) |
+| **20 + ⌈items/60⌉** | `candleSnapshot` (200 candles ≈ 24) |
+| **20 + ⌈items/20⌉** | `userFills`, `userFillsByTime`, `recentTrades`, `historicalOrders` |
+| **40** | Explorer API requests |
+| **60** | `userRole` |
+
+Exchange API (orders): `1 + ⌊batch_length / 40⌋`
+
+### WebSocket Limits
+
+| Limit | Value |
+|-------|-------|
+| Max connections per IP | **10** |
+| Max new connections per minute | **30** |
+| Max subscriptions | **1000** |
+| Max unique users (user-specific subs) | **10** |
+| Max messages sent per minute | **2000** |
+| Max inflight post messages | **100** |
+
+### Address-Based Limits (Per User)
+
+- 1 request per 1 USDC traded cumulatively (initial buffer: 10,000)
+- When limited: 1 request per 10 seconds
+- Cancel limit: `min(limit + 100000, limit × 2)`
+- Open order limit: 1000 + 1 per 5M USDC volume (max 5000)
+
+### Best Practices
+
+1. **Use weight-based limiter** — not fixed delay. `clearinghouseState` (w=2) can run 10× faster than `userFills` (w=20+).
+2. **Batch when possible** — batched exchange requests count as 1 IP request.
+3. **Back off on 429** — wait 5–10s before retrying.
+4. **Track response size** for variable-weight endpoints to account for actual cost.
+5. **Use 85% safety margin** (budget ≈ 1020) to leave headroom for concurrent processes.

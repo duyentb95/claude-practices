@@ -2,6 +2,18 @@
 
 ---
 
+## [1.2.0] - 2026-03-13
+
+### Added
+- **Rate Limits documentation**: Full weight system documented in `info-endpoint.md` — endpoint weights (2/20/60/variable), WebSocket limits (10 connections, 1000 subs), address-based limits, best practices.
+- **L2 Book enhanced docs**: `nSigFigs`, `mantissa` aggregation params, response format with `n` (order count), weight=2 note.
+- **Candle Snapshot enhanced docs**: 5000 candle limit, HIP-3 prefix format, all 14 intervals, weight formula (20+⌈items/60⌉).
+
+### Changed
+- Rate limiter recommendation: use **weight-based** limiter instead of fixed delay. Different endpoints have vastly different costs (w=2 for l2Book vs w=20+ for userFills).
+
+---
+
 ## [1.1.0] - 2026-03-09
 
 ### Added

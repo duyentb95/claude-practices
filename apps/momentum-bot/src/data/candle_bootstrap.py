@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import time
+from typing import TYPE_CHECKING
 
 import aiohttp
 import structlog
 
 from src.data.candle_store import CandleStore
 from src.strategy.models import Candle
+
+if TYPE_CHECKING:
+    from src.utils.rate_limiter import HyperliquidRateLimiter
 
 logger = structlog.get_logger(__name__)
 
@@ -22,6 +26,7 @@ async def bootstrap_candles(
     candle_store: CandleStore,
     count: int = 200,
     api_url: str = INFO_ENDPOINT,
+    rate_limiter: HyperliquidRateLimiter | None = None,
 ) -> int:
     """Fetch *count* historical 1m candles for *coin* and load into *candle_store*.
 
@@ -46,16 +51,20 @@ async def bootstrap_candles(
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                api_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning("bootstrap_http_error", coin=coin, status=resp.status)
-                    return 0
-                raw_candles = await resp.json()
+        if rate_limiter:
+            async with aiohttp.ClientSession() as session:
+                raw_candles = await rate_limiter.post_info(session, api_url, payload)
+        else:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning("bootstrap_http_error", coin=coin, status=resp.status)
+                        return 0
+                    raw_candles = await resp.json()
     except Exception as exc:
         logger.warning("bootstrap_fetch_error", coin=coin, error=str(exc))
         return 0

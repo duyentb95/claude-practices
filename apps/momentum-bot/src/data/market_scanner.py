@@ -8,11 +8,14 @@ from __future__ import annotations
 import collections
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
 from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.utils.rate_limiter import HyperliquidRateLimiter
 
 log = get_logger(__name__)
 
@@ -52,10 +55,12 @@ class MarketScanner:
         scanner_events: collections.deque,
         min_24h_volume_usd: float = 5_000_000,
         top_n: int = 10,
+        rate_limiter: HyperliquidRateLimiter | None = None,
     ) -> None:
         self._events = scanner_events
         self._min_vol = min_24h_volume_usd
         self._top_n = top_n
+        self._rate_limiter = rate_limiter
         self._session: aiohttp.ClientSession | None = None
         self._scan_count = 0
 
@@ -74,6 +79,11 @@ class MarketScanner:
     async def _post_info(self, payload: dict[str, Any]) -> Any:
         if self._session is None:
             self._session = aiohttp.ClientSession()
+        if self._rate_limiter:
+            data = await self._rate_limiter.post_info(self._session, INFO_ENDPOINT, payload)
+            if data is None:
+                self._emit("ERROR", f"API request failed for {payload.get('type', '?')}")
+            return data
         try:
             async with self._session.post(
                 INFO_ENDPOINT,
