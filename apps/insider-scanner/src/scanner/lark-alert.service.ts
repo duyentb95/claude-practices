@@ -148,6 +148,7 @@ export class LarkAlertService {
   private passesTier(coin: string, usdSize: number, tiers: MegaTierConfig): boolean {
     if (BLUECHIP_COINS.includes(coin)) return usdSize >= tiers.bluechip;
     if (MIDCAP_COINS.includes(coin))   return usdSize >= tiers.midcap;
+    if (coin.includes(':'))            return usdSize >= tiers.midcap; // HIP-3 DEX pairs
     return usdSize >= tiers.lowcap;
   }
 
