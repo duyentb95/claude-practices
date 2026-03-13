@@ -387,10 +387,10 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       (trade.takerAddress ? ` by ${trade.takerAddress}` : ''),
     );
 
-    // Fire Lark alert immediately for mega trades (no need to wait for profile)
-    if (trade.usdSize >= megaTradeUsd) {
-      this.lark.alertMegaTrade(trade).catch(() => null);
-    }
+    // Fire Lark alert for trades that meet any webhook's tier threshold.
+    // Per-webhook filtering (BTC/ETH/SOL≥5M, XRP/HYPE≥1M, others≥200K by default)
+    // is handled inside alertMegaTrade.
+    this.lark.alertMegaTrade(trade).catch(() => null);
 
     // Queue async profile + ledger inspection for the detected address
     if (trade.takerAddress) {

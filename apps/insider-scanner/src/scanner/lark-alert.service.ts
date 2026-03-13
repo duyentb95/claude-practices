@@ -10,6 +10,28 @@ const LARK_SEND_GAP_MS = 300;
 
 const COPIN_BASE = 'https://app.copin.io/trader';
 
+// ─── Mega-trade tiered thresholds ────────────────────────────────────────────
+
+const BLUECHIP_COINS = ['BTC', 'ETH', 'SOL'];
+const MIDCAP_COINS = ['XRP', 'HYPE'];
+
+export interface MegaTierConfig {
+  bluechip: number; // BTC, ETH, SOL
+  midcap: number;   // XRP, HYPE
+  lowcap: number;   // everything else
+}
+
+export const DEFAULT_MEGA_TIERS: MegaTierConfig = {
+  bluechip: 5_000_000,
+  midcap:   1_000_000,
+  lowcap:     200_000,
+};
+
+interface CustomWebhookEntry {
+  lastHeartbeat: number;
+  megaTiers: MegaTierConfig;
+}
+
 /** Convert hex address to EIP-55 checksum for Copin URLs. */
 function toChecksum(addr: string): string {
   try { return getAddress(addr); }
@@ -29,20 +51,31 @@ export class LarkAlertService {
 
   /**
    * User-registered custom Lark webhook URLs.
-   * Key = webhook URL, Value = last heartbeat timestamp (ms).
+   * Key = webhook URL, Value = { lastHeartbeat, megaTiers }.
    * Entries expire after 24h of inactivity.
    */
-  private readonly customWebhooks = new Map<string, number>();
+  private readonly customWebhooks = new Map<string, CustomWebhookEntry>();
   private static readonly CUSTOM_WEBHOOK_TTL_MS = 24 * 3_600_000; // 24h
 
   constructor(private readonly httpService: HttpService) {}
 
   // ─── Custom webhook management ───────────────────────────────────────────────
 
-  /** Register (or refresh) a custom webhook URL. */
-  registerWebhook(url: string): void {
-    this.customWebhooks.set(url, Date.now());
-    this.logger.log(`Custom webhook registered: ${url.slice(0, 40)}…`);
+  /** Register (or refresh) a custom webhook URL with optional tier config. */
+  registerWebhook(url: string, megaTiers?: Partial<MegaTierConfig>): void {
+    const existing = this.customWebhooks.get(url);
+    const tiers: MegaTierConfig = {
+      bluechip: megaTiers?.bluechip ?? existing?.megaTiers.bluechip ?? DEFAULT_MEGA_TIERS.bluechip,
+      midcap:   megaTiers?.midcap   ?? existing?.megaTiers.midcap   ?? DEFAULT_MEGA_TIERS.midcap,
+      lowcap:   megaTiers?.lowcap   ?? existing?.megaTiers.lowcap   ?? DEFAULT_MEGA_TIERS.lowcap,
+    };
+    this.customWebhooks.set(url, { lastHeartbeat: Date.now(), megaTiers: tiers });
+    this.logger.log(`Custom webhook registered: ${url.slice(0, 40)}… tiers=${JSON.stringify(tiers)}`);
+  }
+
+  /** Get the config for a custom webhook (null if not registered). */
+  getWebhookConfig(url: string): CustomWebhookEntry | null {
+    return this.customWebhooks.get(url) ?? null;
   }
 
   /** Unregister a custom webhook URL. */
@@ -60,8 +93,8 @@ export class LarkAlertService {
   /** Prune expired custom webhooks (called internally before sending). */
   private pruneExpiredWebhooks(): void {
     const now = Date.now();
-    for (const [url, ts] of this.customWebhooks) {
-      if (now - ts > LarkAlertService.CUSTOM_WEBHOOK_TTL_MS) {
+    for (const [url, entry] of this.customWebhooks) {
+      if (now - entry.lastHeartbeat > LarkAlertService.CUSTOM_WEBHOOK_TTL_MS) {
         this.customWebhooks.delete(url);
         this.logger.log(`Custom webhook expired: ${url.slice(0, 40)}…`);
       }
@@ -94,16 +127,48 @@ export class LarkAlertService {
   }
 
   /**
-   * Alert immediately when a MEGA trade is detected (before profile lookup).
+   * Alert when a large/mega trade is detected (before profile lookup).
+   * Each webhook has its own tier thresholds — only receives alert if trade meets its tier.
+   * ENV default webhook uses DEFAULT_MEGA_TIERS.
    */
   async alertMegaTrade(trade: LargeTrade): Promise<void> {
     if (!larkWebhookUrl && this.customWebhooks.size === 0) return;
 
     const key = `mega_${trade.hash}`;
     if (this.cooldowns.has(key)) return;
-    this.cooldowns.set(key, Date.now());
 
-    this.enqueue(this.buildMegaCard(trade));
+    const eligibleUrls = this.getEligibleMegaUrls(trade.coin, trade.usdSize);
+    if (eligibleUrls.length === 0) return;
+
+    this.cooldowns.set(key, Date.now());
+    this.enqueueToUrls(this.buildMegaCard(trade), eligibleUrls);
+  }
+
+  /** Check if a trade passes a tier threshold for a given coin. */
+  private passesTier(coin: string, usdSize: number, tiers: MegaTierConfig): boolean {
+    if (BLUECHIP_COINS.includes(coin)) return usdSize >= tiers.bluechip;
+    if (MIDCAP_COINS.includes(coin))   return usdSize >= tiers.midcap;
+    return usdSize >= tiers.lowcap;
+  }
+
+  /** Get webhook URLs eligible to receive a mega trade alert for this coin/size. */
+  private getEligibleMegaUrls(coin: string, usdSize: number): string[] {
+    this.pruneExpiredWebhooks();
+    const urls: string[] = [];
+
+    // ENV default webhook uses system default tiers
+    if (larkWebhookUrl && this.passesTier(coin, usdSize, DEFAULT_MEGA_TIERS)) {
+      urls.push(larkWebhookUrl);
+    }
+
+    // Custom webhooks use their own tier config
+    for (const [url, entry] of this.customWebhooks) {
+      if (url !== larkWebhookUrl && this.passesTier(coin, usdSize, entry.megaTiers)) {
+        urls.push(url);
+      }
+    }
+
+    return urls;
   }
 
   /**
@@ -434,6 +499,12 @@ export class LarkAlertService {
     this.drainQueue();
   }
 
+  /** Enqueue a payload to be sent only to specific URLs. */
+  private enqueueToUrls(payload: object, urls: string[]): void {
+    this.sendQueue.push(() => this.doSend(payload, urls));
+    this.drainQueue();
+  }
+
   private async drainQueue(): Promise<void> {
     if (this.isSending) return;
     this.isSending = true;
@@ -447,8 +518,8 @@ export class LarkAlertService {
     this.isSending = false;
   }
 
-  private async doSend(payload: object): Promise<void> {
-    const urls = this.getAllWebhookUrls();
+  private async doSend(payload: object, targetUrls?: string[]): Promise<void> {
+    const urls = targetUrls ?? this.getAllWebhookUrls();
     if (urls.length === 0) return;
 
     for (const url of urls) {

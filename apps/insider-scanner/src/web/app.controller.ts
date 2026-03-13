@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Header, HttpCode, Post } from '@nestjs/common';
 import { getAddress } from 'ethers';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
-import { LarkAlertService } from '../scanner/lark-alert.service';
+import { LarkAlertService, DEFAULT_MEGA_TIERS, MegaTierConfig } from '../scanner/lark-alert.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
 import { LeaderboardMonitorService } from '../scanner/leaderboard-monitor.service';
 import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
@@ -175,7 +175,7 @@ tr:hover td{background:var(--bg-hover)}
   background:var(--bg-card);border-bottom:1px solid var(--border);
   padding:0 20px;overflow:hidden;transition:max-height .25s ease;max-height:0;
 }
-.settings-bar.open{max-height:60px;padding:10px 20px}
+.settings-bar.open{max-height:160px;padding:10px 20px}
 .settings-toggle{
   background:none;border:1px solid var(--border);border-radius:3px;
   color:var(--dim);cursor:pointer;font-family:inherit;font-size:11px;
@@ -234,6 +234,17 @@ tr:hover td{background:var(--bg-hover)}
     <button class="settings-btn" onclick="saveWebhook()">Save</button>
     <button class="settings-btn danger" onclick="removeWebhook()">Remove</button>
     <span class="settings-status" id="webhook-status"></span>
+  </div>
+  <div class="settings-row" id="tier-config-row" style="margin-top:8px;display:none">
+    <span class="stat-lbl" style="min-width:90px">Mega Tiers</span>
+    <span class="cd f10" style="min-width:100px">BTC/ETH/SOL $</span>
+    <input id="tier-bluechip" class="settings-inp" type="number" style="width:100px" placeholder="5000000">
+    <span class="cd f10" style="min-width:80px">XRP/HYPE $</span>
+    <input id="tier-midcap" class="settings-inp" type="number" style="width:100px" placeholder="1000000">
+    <span class="cd f10" style="min-width:70px">Others $</span>
+    <input id="tier-lowcap" class="settings-inp" type="number" style="width:100px" placeholder="200000">
+    <button class="settings-btn" onclick="saveTierConfig()">Apply</button>
+    <span class="settings-status" id="tier-status"></span>
   </div>
 </div>
 
@@ -686,9 +697,13 @@ function poll(){
 poll();
 setInterval(poll, 2000);
 
-// ─ Settings: custom Lark webhook ─────────────────────────────────────────────
+// ─ Settings: custom Lark webhook + tier config ─────────────────────────────
 var WEBHOOK_KEY = 'insider_scanner_lark_webhook';
+var TIER_KEY    = 'insider_scanner_mega_tiers';
 var webhookRegistered = false;
+
+// Default tiers (must match server DEFAULT_MEGA_TIERS)
+var DEFAULT_TIERS = { bluechip: 5000000, midcap: 1000000, lowcap: 200000 };
 
 function toggleSettings(){
   var bar = document.getElementById('settings-bar');
@@ -699,6 +714,33 @@ function webhookStatus(msg, color){
   var el = document.getElementById('webhook-status');
   el.textContent = msg;
   el.style.color = 'var(--' + (color || 'dim') + ')';
+}
+
+function tierStatus(msg, color){
+  var el = document.getElementById('tier-status');
+  el.textContent = msg;
+  el.style.color = 'var(--' + (color || 'dim') + ')';
+}
+
+function showTierConfig(show){
+  document.getElementById('tier-config-row').style.display = show ? 'flex' : 'none';
+}
+
+function loadTierInputs(){
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem(TIER_KEY)); } catch(e){}
+  var t = saved || DEFAULT_TIERS;
+  document.getElementById('tier-bluechip').value = t.bluechip;
+  document.getElementById('tier-midcap').value   = t.midcap;
+  document.getElementById('tier-lowcap').value   = t.lowcap;
+}
+
+function getTierValues(){
+  return {
+    bluechip: parseInt(document.getElementById('tier-bluechip').value) || DEFAULT_TIERS.bluechip,
+    midcap:   parseInt(document.getElementById('tier-midcap').value)   || DEFAULT_TIERS.midcap,
+    lowcap:   parseInt(document.getElementById('tier-lowcap').value)   || DEFAULT_TIERS.lowcap,
+  };
 }
 
 function saveWebhook(){
@@ -712,14 +754,30 @@ function saveWebhook(){
     return;
   }
   localStorage.setItem(WEBHOOK_KEY, url);
-  registerWebhookOnServer(url);
+  var tiers = getTierValues();
+  localStorage.setItem(TIER_KEY, JSON.stringify(tiers));
+  registerWebhookOnServer(url, tiers);
+}
+
+function saveTierConfig(){
+  var url = localStorage.getItem(WEBHOOK_KEY);
+  if(!url){
+    tierStatus('Set webhook first', 'red');
+    return;
+  }
+  var tiers = getTierValues();
+  localStorage.setItem(TIER_KEY, JSON.stringify(tiers));
+  registerWebhookOnServer(url, tiers);
+  tierStatus('✓ Tiers updated', 'green');
 }
 
 function removeWebhook(){
   var url = localStorage.getItem(WEBHOOK_KEY);
   localStorage.removeItem(WEBHOOK_KEY);
+  localStorage.removeItem(TIER_KEY);
   document.getElementById('webhook-inp').value = '';
   webhookRegistered = false;
+  showTierConfig(false);
   if(url){
     fetch('/api/webhook', {
       method: 'DELETE',
@@ -732,17 +790,21 @@ function removeWebhook(){
   }
 }
 
-function registerWebhookOnServer(url){
+function registerWebhookOnServer(url, tiers){
+  var body = { url: url };
+  if(tiers) body.megaTiers = tiers;
   fetch('/api/webhook', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url: url})
+    body: JSON.stringify(body)
   })
   .then(function(r){ return r.json(); })
   .then(function(d){
     if(d.ok){
       webhookRegistered = true;
       webhookStatus('✓ Active — alerts will be sent here', 'green');
+      showTierConfig(true);
+      loadTierInputs();
     } else {
       webhookStatus('Error: ' + (d.error || 'unknown'), 'red');
     }
@@ -757,15 +819,20 @@ function registerWebhookOnServer(url){
   var saved = localStorage.getItem(WEBHOOK_KEY);
   if(saved){
     document.getElementById('webhook-inp').value = saved;
-    registerWebhookOnServer(saved);
+    var tiers = null;
+    try { tiers = JSON.parse(localStorage.getItem(TIER_KEY)); } catch(e){}
+    registerWebhookOnServer(saved, tiers);
   }
+  loadTierInputs();
 })();
 
 // Heartbeat: re-register every 30 min to keep TTL alive
 setInterval(function(){
   var saved = localStorage.getItem(WEBHOOK_KEY);
   if(saved && webhookRegistered){
-    registerWebhookOnServer(saved);
+    var tiers = null;
+    try { tiers = JSON.parse(localStorage.getItem(TIER_KEY)); } catch(e){}
+    registerWebhookOnServer(saved, tiers);
   }
 }, 30 * 60 * 1000);
 </script>
@@ -820,6 +887,7 @@ export class AppController {
       minTradeUsd,
       megaTradeUsd,
       copinEnabled,
+      defaultMegaTiers: DEFAULT_MEGA_TIERS,
       leaderboard: this.leaderboardMonitor.getStats(),
       uptime: Date.now() - this.startedAt,
     };
@@ -829,7 +897,7 @@ export class AppController {
 
   @Post('api/webhook')
   @HttpCode(200)
-  registerWebhook(@Body() body: { url?: string }) {
+  registerWebhook(@Body() body: { url?: string; megaTiers?: Partial<MegaTierConfig> }) {
     const url = body?.url?.trim();
     if (!url) {
       return { ok: false, error: 'Missing url field' };
@@ -837,7 +905,7 @@ export class AppController {
     if (!url.startsWith('https://')) {
       return { ok: false, error: 'Webhook URL must start with https://' };
     }
-    this.lark.registerWebhook(url);
+    this.lark.registerWebhook(url, body.megaTiers);
     return { ok: true, message: 'Webhook registered', activeWebhooks: this.lark.customWebhookCount };
   }
 
