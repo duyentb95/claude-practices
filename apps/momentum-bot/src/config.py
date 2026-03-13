@@ -75,6 +75,8 @@ class ScannerConfig(BaseModel):
     scan_interval_seconds: int = 300
     top_n_candidates: int = 5
     min_24h_volume_usd: int = 5_000_000
+    max_ws_subscriptions: int = 5
+    candle_bootstrap_count: int = 200
 
 
 class AlertConfig(BaseModel):

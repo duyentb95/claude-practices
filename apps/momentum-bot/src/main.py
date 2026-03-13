@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import os
 import signal
 import time
 from pathlib import Path
@@ -20,7 +21,9 @@ from typing import Any
 from src.alerts.lark import LarkAlerter
 from src.alerts.telegram import TelegramAlerter
 from src.config import AppConfig, load_config
+from src.data.candle_pipeline import CandlePipelineManager
 from src.data.candle_store import CandleStore
+from src.data.feeder import HyperliquidFeeder
 from src.data.hl_info import HyperliquidInfoPoller
 from src.data.market_scanner import MarketScanner
 from src.execution.executor import HyperliquidExecutor
@@ -71,6 +74,24 @@ class MomentumBot:
 
         # Scanner terminal events (shared ring buffer).
         self._scanner_events: collections.deque = collections.deque(maxlen=300)
+
+        # WebSocket feeder for live candle data.
+        ws_url = os.environ.get("HYPER_WS_URL", "wss://api.hyperliquid.xyz/ws")
+        self._feeder = HyperliquidFeeder(
+            candle_store=self.candle_store,
+            ws_url=ws_url,
+        )
+
+        # Candle pipeline: connects scanner → WS candles → strategy signals.
+        self._candle_pipeline = CandlePipelineManager(
+            feeder=self._feeder,
+            candle_store=self.candle_store,
+            scanner_events=self._scanner_events,
+            on_signal_callback=self.on_signal,
+            max_subs=config.scanner.max_ws_subscriptions,
+            min_candles=config.strategy.staircase.min_lookback_candles,
+            bootstrap_count=config.scanner.candle_bootstrap_count,
+        )
 
         # Market scanner.
         self._market_scanner = MarketScanner(
@@ -176,15 +197,17 @@ class MomentumBot:
         self._dashboard = DashboardServer(bot_state)
         await self._dashboard.start()
 
-        # Run the scanning, position management, and data poller loops concurrently.
+        # Run the scanning, position management, WS feeder, and data poller loops concurrently.
         try:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self._hl_poller.run(), name="hl_info_poller")
+                tg.create_task(self._feeder.run(), name="ws_feeder")
                 tg.create_task(self.scan_loop(), name="scan_loop")
                 tg.create_task(self.position_loop(), name="position_loop")
         except* asyncio.CancelledError:
             log.info("bot_loops_cancelled")
         finally:
+            await self._feeder.stop()
             if self._dashboard:
                 await self._dashboard.stop()
             self._running = False
@@ -247,8 +270,8 @@ class MomentumBot:
         Steps:
         1. Fetch market data via MarketScanner (metaAndAssetCtxs).
         2. Screen and rank coins by momentum, volume, OI.
-        3. Convert SIGNAL candidates into Signal objects.
-        4. Feed signals through on_signal() for risk checks and execution.
+        3. Pass candidates to the candle pipeline for WS subscription management.
+        4. Signals are generated asynchronously by the pipeline on each 1m candle close.
         """
         try:
             signal_candidates = await self._market_scanner.run_scan()
@@ -258,44 +281,14 @@ class MomentumBot:
                 open_positions=len(self._positions),
             )
 
-            # Convert scanner candidates into trading signals
-            for c in signal_candidates:
-                # Skip coins we already have positions in
-                if c["coin"] in self._positions:
-                    log.info("skip_existing_position", coin=c["coin"])
-                    continue
+            # Pass candidates to the candle pipeline for subscription management.
+            # Coins with open positions are protected from unsubscription.
+            protected = set(self._positions.keys())
+            await self._candle_pipeline.update_candidates(signal_candidates, protected)
 
-                # Calculate SL/TP from price-based percentage approach
-                price = c["price"]
-                if price <= 0:
-                    continue
-
-                direction = SignalDirection.LONG if c["direction"] == "LONG" else SignalDirection.SHORT
-                # SL distance: 2% of entry price (configurable via risk config)
-                sl_pct = self.config.risk.max_risk_per_trade_pct  # default 2%
-                sl_distance = price * sl_pct
-
-                if direction == SignalDirection.LONG:
-                    sl_price = price - sl_distance
-                    tp_price = price + sl_distance * self.config.strategy.targets.default_rr
-                else:
-                    sl_price = price + sl_distance
-                    tp_price = price - sl_distance * self.config.strategy.targets.default_rr
-
-                signal_obj = Signal(
-                    coin=c["coin"],
-                    direction=direction,
-                    entry_price=round(price, 6),
-                    stop_loss=round(sl_price, 6),
-                    take_profit=round(tp_price, 6),
-                    regime_score=max(2, int(c.get("score", 0) / 20)),  # map 0-100 to 0-5
-                    timestamp=int(time.time() * 1000),
-                    staircase_score=c.get("score", 0),
-                    volume_score=c.get("score", 0),
-                    confidence=c.get("score", 0),
-                )
-
-                await self.on_signal(signal_obj)
+            # Update subscribed coins set for dashboard visibility.
+            self._subscribed_coins.clear()
+            self._subscribed_coins.update(self._candle_pipeline.subscribed_coins)
 
         except Exception:
             log.exception("market_scanner_error")
@@ -696,7 +689,6 @@ def main() -> None:
     args = parser.parse_args()
 
     # Env var override for Docker: DRY_RUN=false enables live trading.
-    import os
     dry_run_env = os.getenv("DRY_RUN")
     dry_run = args.dry_run if dry_run_env is None else dry_run_env.lower() != "false"
 

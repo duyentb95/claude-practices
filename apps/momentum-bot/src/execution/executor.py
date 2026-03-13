@@ -16,6 +16,8 @@ from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants as hl_constants
 
+from src.utils.hl_helpers import AssetMetaCache, round_price, round_size
+
 logger = structlog.get_logger(__name__)
 
 # Default slippage for market orders (0.5%)
@@ -84,6 +86,7 @@ class HyperliquidExecutor:
         )
         self._account_address = account_address
         self._testnet = testnet
+        self._asset_meta = AssetMetaCache()
 
         logger.info(
             "executor_init",
@@ -118,15 +121,21 @@ class HyperliquidExecutor:
     ) -> dict[str, Any]:
         """Place a GTC limit order.
 
-        Returns the SDK order response dict which includes ``statuses``
-        with the order id on success.
+        Price and size are rounded per Hyperliquid tick/lot rules before
+        submission.  Returns the SDK order response dict.
         """
+        await self._asset_meta.ensure_loaded()
+        sz_dec = self._asset_meta.get_sz_decimals(coin)
+        price = round_price(price, sz_dec)
+        size = round_size(size, sz_dec)
+
         logger.info(
             "place_limit",
             coin=coin,
             side="BUY" if is_buy else "SELL",
             size=size,
             price=price,
+            sz_decimals=sz_dec,
         )
         result: dict[str, Any] = await self._run_sync(
             self._exchange.order,
@@ -150,17 +159,24 @@ class HyperliquidExecutor:
         """Place an IOC limit order at mid +/- slippage to simulate market.
 
         The price is fetched from ``allMids`` and adjusted by
-        *slippage_pct* in the direction of the trade.
+        *slippage_pct* in the direction of the trade.  Both price and
+        size are rounded per Hyperliquid tick/lot rules.
         """
+        await self._asset_meta.ensure_loaded()
+        sz_dec = self._asset_meta.get_sz_decimals(coin)
+
         mids = await self.get_all_mids()
         mid = mids.get(coin)
         if mid is None or mid <= 0:
             raise ValueError(f"No mid price available for {coin}")
 
         if is_buy:
-            price = round(mid * (1 + slippage_pct), 6)
+            price = mid * (1 + slippage_pct)
         else:
-            price = round(mid * (1 - slippage_pct), 6)
+            price = mid * (1 - slippage_pct)
+
+        price = round_price(price, sz_dec)
+        size = round_size(size, sz_dec)
 
         logger.info(
             "place_market",
@@ -169,6 +185,7 @@ class HyperliquidExecutor:
             size=size,
             mid=mid,
             limit_price=price,
+            sz_decimals=sz_dec,
         )
         result: dict[str, Any] = await self._run_sync(
             self._exchange.order,
@@ -191,8 +208,13 @@ class HyperliquidExecutor:
         """Place a trigger stop-loss order (reduce_only).
 
         *is_buy* should be the **closing** side: ``True`` to close a short,
-        ``False`` to close a long.
+        ``False`` to close a long.  Trigger price and size are rounded.
         """
+        await self._asset_meta.ensure_loaded()
+        sz_dec = self._asset_meta.get_sz_decimals(coin)
+        trigger_price = round_price(trigger_price, sz_dec)
+        size = round_size(size, sz_dec)
+
         logger.info(
             "set_stop_loss",
             coin=coin,
@@ -221,8 +243,13 @@ class HyperliquidExecutor:
     ) -> dict[str, Any]:
         """Place a trigger take-profit order (reduce_only).
 
-        *is_buy* is the **closing** side.
+        *is_buy* is the **closing** side.  Trigger price and size are rounded.
         """
+        await self._asset_meta.ensure_loaded()
+        sz_dec = self._asset_meta.get_sz_decimals(coin)
+        trigger_price = round_price(trigger_price, sz_dec)
+        size = round_size(size, sz_dec)
+
         logger.info(
             "set_take_profit",
             coin=coin,
@@ -259,7 +286,12 @@ class HyperliquidExecutor:
         size: float,
         price: float,
     ) -> dict[str, Any]:
-        """Modify an existing order (amend price/size)."""
+        """Modify an existing order (amend price/size).  Rounds both."""
+        await self._asset_meta.ensure_loaded()
+        sz_dec = self._asset_meta.get_sz_decimals(coin)
+        price = round_price(price, sz_dec)
+        size = round_size(size, sz_dec)
+
         logger.info(
             "modify_order",
             oid=oid,
