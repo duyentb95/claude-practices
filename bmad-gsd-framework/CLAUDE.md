@@ -88,7 +88,7 @@ Khi bắt đầu dự án hoặc session mới:
 
 **Task Brief Format** (cho sub-agent):
 ```markdown
-# 🎯 TASK_NNN: [Tên ngắn gọn]
+# TASK_NNN: [Tên ngắn gọn]
 Model: [Opus/Sonnet] | Priority: [Critical/High/Normal] | Mode: [GSD/New/Refactor]
 
 ## Context (Chỉ đọc những file này)
@@ -143,18 +143,18 @@ Khi conversation dài (hoặc Claude bắt đầu "quên"):
    **Date**: [timestamp]
    **Project**: [tên]
    **Current Sprint**: [sprint nào]
-   
+
    ## Progress
-   - TASK_001: ✅ Done — [1-line summary]
-   - TASK_002: 🔄 In progress — [trạng thái]
-   - TASK_003: ⏳ Not started
-   
+   - TASK_001: Done — [1-line summary]
+   - TASK_002: In progress — [trạng thái]
+   - TASK_003: Not started
+
    ## Key Decisions Made
    - [Decision 1 + lý do]
-   
+
    ## Blockers
    - [Nếu có]
-   
+
    ## Next Actions
    1. [Việc tiếp theo]
    ```
@@ -198,6 +198,126 @@ Khi user cung cấp sample output (screenshot, HTML, file mẫu):
    - Interaction patterns
 3. Viết thành `.bmad/knowledge/RULES.md`
 4. Sub-agents đọc RULES.md → output sát 99% mong muốn
+
+## Model Routing — Tiết Kiệm Chi Phí
+
+### Triết lý: Brain vs Body
+
+```
+Brain (Claude Cowork / Opus) = NƠI SUY NGHĨ
+  → Thiết kế, reasoning, architecture, debug, strategy, code generation
+  → Chi phí cố định (subscription) — build không giới hạn
+
+Body (Sub-agents / Sonnet / Mini) = NƠI THỰC THI
+  → Chạy script, fetch data, format, check điều kiện, gửi alert
+  → Chi phí theo token — tối ưu bằng model routing
+```
+
+**Quy tắc vàng: Build một lần trong Brain → Chạy mãi mãi trong Body**
+
+### Model Tier Classification
+
+Khi Master-Agent phân task, LUÔN chọn model tier phù hợp:
+
+```
+Tier 1 — Premium (Opus)
+   Dùng cho: reasoning sâu, architecture design, debug phức tạp, strategy logic
+   Cost: Cao nhất — chỉ dùng khi CẦN suy nghĩ
+
+Tier 2 — Mid (Sonnet)
+   Dùng cho: code implementation, classification, summarization, data analysis
+   Cost: Trung bình — workhorse chính
+
+Tier 3 — Light (Haiku)
+   Dùng cho: fetch API, check conditions, format data, send alerts, logging
+   Cost: Rất rẻ — chạy hàng trăm lần/ngày chỉ vài cent
+
+Tier 4 — Free/Local (Ollama / local models)
+   Dùng cho: logging, background processing, text formatting
+   Cost: Zero
+```
+
+### Cost Estimation Template
+
+Khi Master-Agent lên plan, include cost estimate:
+
+```markdown
+## Cost Estimate
+| Task | Model | Est. Tokens | Est. Cost |
+|------|-------|-------------|-----------|
+| TASK_001 (design logic) | Opus | ~5K | ~$0.15 |
+| TASK_002 (implement) | Sonnet | ~10K | ~$0.06 |
+| TASK_003 (fetch + format) | Haiku | ~2K | ~$0.001 |
+| Total sprint estimate | | | ~$0.21 |
+```
+
+## Production Agent Pipeline — Build Once, Run Forever
+
+### Development → Production Flow
+
+```
+Development (Claude Code): Thiết kế + build + test logic
+    │
+    │ Export scripts/code
+    ▼
+Production (cron / Docker / Railway): Chạy automated 24/7
+    │
+    │ Khi cần thay đổi logic
+    ▼
+Quay lại Development: Chỉnh sửa → re-deploy
+```
+
+### Production Pipeline Architecture
+
+**KHÔNG viết 1 monolith script.** Tách thành pipeline sub-agents:
+
+```
+PRODUCTION PIPELINE (ví dụ: Alert System)
+
+  FETCH Agent (Tier 3) ──► DETECT Agent (Tier 2) ──► POST Agent (Tier 3)
+  Lấy data, lưu raw       So sánh mới vs cũ         Format msg, send alert
+  1 lần/cycle              Lọc noise, đánh giá       ONLY if signal found
+
+  COORDINATOR (Tier 3)     ANALYSIS (Tier 2)
+  Điều phối pipeline       Chạy daily, phân tích dài hạn
+```
+
+### Tại sao tách pipeline?
+
+```
+Monolith:  Format lỗi → chạy lại TOÀN BỘ → tốn tiền, tốn thời gian
+Pipeline:  Format lỗi → chỉ sửa POST agent
+           Logic sai  → chỉ test DETECT agent
+           API đắt    → kiểm soát FETCH agent riêng
+```
+
+### Pipeline Task Brief Template
+
+```markdown
+# PIPELINE: [Tên pipeline]
+**Schedule**: Mỗi [30 min / 1h / daily]
+**Total agents**: [N]
+**Est. daily cost**: $[X]
+
+## Agent 1: FETCH
+- Model: Tier 3 (Haiku)
+- Input: API endpoint
+- Output: data/raw/{timestamp}.json
+- Fail behavior: Retry 3x, then alert coordinator
+
+## Agent 2: DETECT
+- Model: Tier 2 (Sonnet)
+- Input: data/raw/{timestamp}.json + data/raw/{previous}.json
+- Output: signal/no-signal decision + confidence score
+- Fail behavior: Log error, skip cycle
+
+## Agent 3: POST
+- Model: Tier 3 (Haiku)
+- Input: Signal from DETECT
+- Output: Formatted message → Telegram/Lark
+- Fail behavior: Queue message, retry next cycle
+- ONLY runs if DETECT found signal (cost = $0 on quiet days)
+```
 
 ## Communication Rules
 

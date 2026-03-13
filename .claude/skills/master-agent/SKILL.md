@@ -53,16 +53,40 @@ For each task, determine:
 
 ```
 TASK_NNN_short_name:
-  Model:        Opus if reasoning-heavy (architecture, analysis, strategy)
-                Sonnet if execution-heavy (coding, formatting, data processing)
+  Model Tier:   Opus if reasoning-heavy (architecture, analysis, strategy)
+                Sonnet if implementation (coding, formatting, data processing)
+                Haiku if execution-only (fetch, check, format, alert)
+  Reasoning:    WHY this tier (1 sentence — prevent cost waste)
   Context:      MINIMUM files needed (list exact paths)
   Dependencies: Which tasks must complete first
   Parallel:     Can run alongside which other tasks
   DoD:          Specific, verifiable completion criteria
   Sample ref:   Template/screenshot if applicable
-  Estimated:    < 15 min → GSD (do it yourself)
-                > 15 min → Delegate to sub-agent
+  Estimated:    < 15 min — GSD (do it yourself)
+                > 15 min — Delegate to sub-agent
+  Production?:  Is this a one-time build task or a recurring pipeline agent?
 ```
+
+### 3b. Cost-Aware Planning
+
+When presenting a plan, ALWAYS include cost tier breakdown:
+```
+Sprint cost estimate:
+  Opus tasks: N tasks — highest cost, use sparingly
+  Sonnet tasks: N tasks — main workhorses
+  Haiku tasks: N tasks — cheapest, use for all execution
+
+Optimization check: Can any Opus task be split into Opus design + Sonnet implementation?
+```
+
+### 3c. Production Pipeline Design
+
+When user needs a recurring/automated system:
+1. Design logic in current session (Brain phase)
+2. Export as standalone scripts (each agent = 1 script)
+3. Create Pipeline Brief with model tier per agent
+4. **Principle: DETECT agent is the only one that needs intelligence. Everything else = Tier 3.**
+5. Include fail behavior and cost estimate per cycle
 
 ### 4. GSD Mode (Quick Strike)
 

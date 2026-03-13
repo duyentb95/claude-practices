@@ -16,10 +16,10 @@ Enter Plan Mode. Master-Agent analyzes request and creates task breakdown.
 
 **Usage:** `/plan [description of what needs to be done]`
 
-1. Master-Agent reads context → proposes task breakdown
-2. Presents plan with task board (IDs, models, dependencies, parallel groups)
+1. Master-Agent reads context — proposes task breakdown
+2. Presents plan with task board (IDs, model tiers, dependencies, parallel groups, cost estimate)
 3. WAITS for user to type `CONFIRMED` before proceeding
-4. On confirm → writes tasks to `.bmad/tasks/` and updates MASTER_PLAN
+4. On confirm — writes tasks to `.bmad/tasks/` and updates MASTER_PLAN
 
 ---
 
@@ -29,7 +29,7 @@ Check current project status.
 
 **Usage:** `/status`
 
-Reads MASTER_PLAN.md → shows task board with current statuses.
+Reads MASTER_PLAN.md — shows task board with current statuses.
 Recommends next action.
 
 ---
@@ -40,7 +40,7 @@ Compact current session context for handoff.
 
 **Usage:** `/compact`
 
-Activates Context Compactor → writes STAGING.md → signals ready for fresh session.
+Activates Context Compactor — writes STAGING.md — signals ready for fresh session.
 
 ---
 
@@ -50,7 +50,7 @@ Review completed sub-agent output.
 
 **Usage:** `/review TASK_NNN`
 
-Master-Agent reads task brief + output → checks against DoD → reports findings.
+Master-Agent reads task brief + output — checks against DoD — reports findings.
 
 ---
 
@@ -72,3 +72,31 @@ Quick-strike mode. Do it now, no planning overhead.
 **Usage:** `/gsd [simple task description]`
 
 For tasks < 15 minutes. Master-Agent executes directly, commits, reports.
+
+---
+
+# /pipeline
+
+Design a production agent pipeline (Brain — Body pattern).
+
+**Usage:** `/pipeline [what needs to run automatically]`
+
+Master-Agent designs a multi-agent pipeline:
+1. Identifies agents needed (Fetch, Detect, Post, Coordinator, Analysis)
+2. Assigns model tier per agent (minimize cost)
+3. Defines fail behavior and retry logic
+4. Estimates daily/monthly cost
+5. Creates standalone scripts ready for deployment
+
+---
+
+# /cost
+
+Show cost analysis for current sprint and running pipelines.
+
+**Usage:** `/cost`
+
+Reads MASTER_PLAN — calculates:
+- Sprint cost by model tier
+- Running pipeline daily/monthly cost
+- Optimization suggestions (any task using too expensive a model?)
