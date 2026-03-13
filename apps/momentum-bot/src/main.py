@@ -484,8 +484,13 @@ class MomentumBot:
             )
             log.info("tp_order_placed", coin=signal_obj.coin, result=tp_result)
 
-        except Exception:
-            log.exception("order_placement_failed", coin=signal_obj.coin)
+        except Exception as exc:
+            log.exception(
+                "order_placement_failed",
+                coin=signal_obj.coin,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             return
 
         # Track position

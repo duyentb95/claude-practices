@@ -955,11 +955,26 @@ function renderLogEntry(e) {
   }
   var mod = e.module ? (e.module + (e.func ? '.' + e.func : '')) : '';
   if (mod) msg = '<strong>' + mod + '</strong> ' + msg;
+  /* Show error + traceback for ERROR/CRITICAL entries */
+  var errBlock = '';
+  if (e.error) {
+    errBlock += '<div style="color:#ff6b6b;margin:4px 0 2px 90px;font-weight:600;">' + escHtml(e.error) + '</div>';
+  }
+  if (e.traceback) {
+    errBlock += '<pre style="color:#ff9999;margin:2px 0 4px 90px;font-size:11px;white-space:pre-wrap;opacity:0.85;max-height:200px;overflow-y:auto;">' + escHtml(e.traceback) + '</pre>';
+  }
   return '<div class="log-entry">'
     + '<span class="log-time">' + t + '</span>'
     + '<span class="log-level log-level-' + lvl + '">' + lvl + '</span>'
     + '<span class="log-msg">' + msg + extra + '</span>'
+    + errBlock
     + '</div>';
+}
+
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.appendChild(document.createTextNode(s));
+  return d.innerHTML;
 }
 
 function updateLogs(data) {

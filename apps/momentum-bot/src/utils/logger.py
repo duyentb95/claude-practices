@@ -57,8 +57,25 @@ def _collect_log_processor(
         "module": event_dict.get("module", ""),
         "func": event_dict.get("func_name", ""),
     }
+    # Capture exception info if present (from log.exception() calls)
+    exc_info = event_dict.get("exc_info")
+    if exc_info:
+        import traceback as tb_mod
+        if isinstance(exc_info, BaseException):
+            entry["error"] = f"{type(exc_info).__name__}: {exc_info}"
+            entry["traceback"] = "".join(tb_mod.format_exception(type(exc_info), exc_info, exc_info.__traceback__))
+        elif isinstance(exc_info, tuple) and len(exc_info) == 3:
+            entry["error"] = f"{exc_info[0].__name__}: {exc_info[1]}" if exc_info[0] else str(exc_info[1])
+            entry["traceback"] = "".join(tb_mod.format_exception(*exc_info))
+        elif exc_info is True:
+            import sys
+            ei = sys.exc_info()
+            if ei[0] is not None:
+                entry["error"] = f"{ei[0].__name__}: {ei[1]}"
+                entry["traceback"] = "".join(tb_mod.format_exception(*ei))
     # Capture extra kwargs (coin, pnl, error, etc.)
-    skip = {"timestamp", "log_level", "event", "module", "func_name", "lineno", "_record", "_from_stdlib"}
+    skip = {"timestamp", "log_level", "event", "module", "func_name", "lineno",
+            "_record", "_from_stdlib", "exc_info", "stack_info"}
     extras = {k: v for k, v in event_dict.items() if k not in skip}
     if extras:
         entry["extra"] = extras
