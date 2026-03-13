@@ -24,14 +24,15 @@ npx jest path/to/file.spec.ts
 
 ## Monorepo Structure
 
-NestJS monorepo with 2 active apps in `apps/`:
+NestJS monorepo with 3 registered apps in `nest-cli.json`:
 
 | App | Port | Config source |
 |-----|------|---------------|
+| `hyperliquid-bot` | 3233 | hardcoded |
 | `data-analytics` | 3234 | `PORT` env var |
 | `insider-scanner` | 3235 | `WEB_PORT` env var |
 
-Both apps registered in `nest-cli.json`.
+Additional apps: `hyper-rau` (manual build), `momentum-bot` (Python, standalone).
 
 ## insider-scanner Architecture
 
@@ -41,8 +42,9 @@ Real-time scanner detecting insider trading patterns on Hyperliquid.
 - `InsiderDetectorService` — composite scoring engine (0–100); MM/HFT filter via Hyperliquid `userFees` API; maintains suspects map and large trades rolling window.
 - `RateLimiterService` — sequential queue with 1100ms delay between REST calls.
 - `HyperliquidInfoService` — read-only REST client; all calls POST `/info` (fills, ledger, positions, fee tier).
-- `LarkAlertService` — Lark webhook alerts with AlertLevel color coding.
-- `AppController` — `GET /` dashboard HTML; `GET /api/state` JSON state.
+- `LarkAlertService` — Lark webhook alerts with AlertLevel color coding; supports custom per-user webhooks via `POST /api/webhook` with 24h TTL.
+- `LeaderboardMonitorService` — tracks top-100 Copin leaderboard traders, flags unusual coin trades.
+- `AppController` — `GET /` dashboard HTML; `GET /api/state` JSON state; `POST /api/webhook` register custom webhook; `DELETE /api/webhook` unregister.
 
 ### Scoring Engine
 
@@ -69,19 +71,35 @@ Composite score A+B+C+D+E × F (0–100):
 AlertLevel: CRITICAL(≥75) | HIGH(≥55) | MEDIUM(≥40) | LOW(≥25) | NONE
 WalletType: GHOST | ONE_SHOT | FRESH | SUB_ACCOUNT | WHALE | NORMAL
 InsiderFlag: LARGE | MEGA | NEW_ACCT | FIRST | FRESH_DEP | DEP_ONLY |
-             GHOST | ONE_SHOT | ALL_IN | HIGH_LEV | DEAD_MKT | HIGH_OI | HFT
+             GHOST | ONE_SHOT | ALL_IN | HIGH_LEV | DEAD_MKT | HIGH_OI |
+             VOL_SPIKE | NEW_LIST | HFT | COPIN_SUSP | SMART | LINKED | LB_COIN
 ```
 
 ### Environment Variables (insider-scanner)
 
 ```
-WEB_PORT=3235          # HTTP port (Railway uses PORT env automatically)
-HYPER_WS_URL           # default: wss://api.hyperliquid.xyz/ws
-HYPER_API_URL          # default: https://api.hyperliquid.xyz
-MIN_TRADE_USD          # default: 100000
-MEGA_TRADE_USD         # default: 1000000
-LARK_WEBHOOK_URL       # optional Lark bot webhook
-REST_RATE_LIMIT_MS     # default: 1100
+WEB_PORT=3235              # HTTP port (Railway uses PORT env automatically)
+HYPER_WS_URL               # default: wss://api.hyperliquid.xyz/ws
+HYPER_API_URL              # default: https://api.hyperliquid.xyz
+MIN_TRADE_USD              # default: 100000
+MEGA_TRADE_USD             # default: 1000000
+LARK_WEBHOOK_URL           # Lark bot webhook (has hardcoded default)
+LARK_ALERT_COOLDOWN_MS     # default: 600000 (10 min)
+REST_RATE_LIMIT_MS         # default: 1100
+NEW_TRADER_FILLS_THRESHOLD # default: 30
+TRADER_CACHE_TTL_MS        # default: 300000 (5 min)
+MAX_TRADE_HISTORY          # default: 50
+MAX_SUSPECTS               # default: 30
+COPIN_API_KEY              # Copin Analyzer API key (or X_API_KEY legacy)
+COPIN_API_URL              # default: https://api.copin.io
+COPIN_ENABLED              # default: true (if API key set)
+COPIN_RATE_LIMIT_MS        # default: 2000
+COPIN_WHITELIST_REFRESH_MS # default: 21600000 (6h)
+LEADERBOARD_REFRESH_MS     # default: 21600000 (6h)
+LEADERBOARD_SIZE           # default: 100
+LEADERBOARD_ALERT_ENABLED  # default: true
+FP_DIGEST_ENABLED          # default: true
+FP_DIGEST_HOUR             # default: 8 (UTC)
 ```
 
 ## data-analytics Architecture
