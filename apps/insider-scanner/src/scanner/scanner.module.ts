@@ -11,6 +11,6 @@ import { LeaderboardMonitorService } from './leaderboard-monitor.service';
 @Module({
   imports: [HttpModule, HyperliquidInfoModule, CopinInfoModule],
   providers: [WsScannerService, RateLimiterService, InsiderDetectorService, LarkAlertService, LeaderboardMonitorService],
-  exports: [WsScannerService, InsiderDetectorService, LeaderboardMonitorService],
+  exports: [WsScannerService, InsiderDetectorService, LarkAlertService, LeaderboardMonitorService],
 })
 export class ScannerModule {}
