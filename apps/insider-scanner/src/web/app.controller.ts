@@ -1,6 +1,7 @@
-import { Controller, Get, Header } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, Post } from '@nestjs/common';
 import { getAddress } from 'ethers';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
+import { LarkAlertService } from '../scanner/lark-alert.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
 import { LeaderboardMonitorService } from '../scanner/leaderboard-monitor.service';
 import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
@@ -168,6 +169,36 @@ tr:hover td{background:var(--bg-hover)}
 }
 .rdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--dim);margin-right:5px;transition:background .1s}
 .rdot.active{background:var(--cyan)}
+
+/* ─ Settings bar ────────────────────────── */
+.settings-bar{
+  background:var(--bg-card);border-bottom:1px solid var(--border);
+  padding:0 20px;overflow:hidden;transition:max-height .25s ease;max-height:0;
+}
+.settings-bar.open{max-height:60px;padding:10px 20px}
+.settings-toggle{
+  background:none;border:1px solid var(--border);border-radius:3px;
+  color:var(--dim);cursor:pointer;font-family:inherit;font-size:11px;
+  padding:2px 10px;transition:all .15s;
+}
+.settings-toggle:hover{border-color:var(--cyan);color:var(--cyan)}
+.settings-row{display:flex;align-items:center;gap:10px}
+.settings-inp{
+  background:var(--bg);border:1px solid var(--border);border-radius:3px;
+  color:var(--text);font-family:inherit;font-size:11px;
+  padding:5px 10px;width:420px;outline:none;transition:border-color .15s;
+}
+.settings-inp::placeholder{color:var(--dim)}
+.settings-inp:focus{border-color:var(--cyan)}
+.settings-btn{
+  background:rgba(57,197,207,.1);border:1px solid var(--cyan);border-radius:3px;
+  color:var(--cyan);cursor:pointer;font-family:inherit;font-size:11px;
+  padding:4px 14px;transition:all .15s;font-weight:600;
+}
+.settings-btn:hover{background:rgba(57,197,207,.2)}
+.settings-btn.danger{border-color:var(--red);color:var(--red);background:rgba(248,81,73,.08)}
+.settings-btn.danger:hover{background:rgba(248,81,73,.15)}
+.settings-status{font-size:10px;margin-left:6px}
 </style>
 </head>
 <body>
@@ -189,6 +220,20 @@ tr:hover td{background:var(--bg-hover)}
     <div><div class="stat-lbl">Suspects</div><div class="stat-val cr" id="s-susp">—</div></div>
     <div><div class="stat-lbl">Queue</div><div class="stat-val" id="s-queue">—</div></div>
     <div><div class="stat-lbl">Last Msg</div><div class="stat-val cd" id="s-last">—</div></div>
+    <button class="settings-toggle" onclick="toggleSettings()" title="Lark webhook settings">⚙ Settings</button>
+  </div>
+</div>
+
+<!-- Settings bar (collapsed by default) -->
+<div class="settings-bar" id="settings-bar">
+  <div class="settings-row">
+    <span class="stat-lbl" style="min-width:90px">Lark Webhook</span>
+    <input id="webhook-inp" class="settings-inp" type="text"
+      placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/..."
+      autocomplete="off" spellcheck="false">
+    <button class="settings-btn" onclick="saveWebhook()">Save</button>
+    <button class="settings-btn danger" onclick="removeWebhook()">Remove</button>
+    <span class="settings-status" id="webhook-status"></span>
   </div>
 </div>
 
@@ -640,6 +685,89 @@ function poll(){
 
 poll();
 setInterval(poll, 2000);
+
+// ─ Settings: custom Lark webhook ─────────────────────────────────────────────
+var WEBHOOK_KEY = 'insider_scanner_lark_webhook';
+var webhookRegistered = false;
+
+function toggleSettings(){
+  var bar = document.getElementById('settings-bar');
+  bar.classList.toggle('open');
+}
+
+function webhookStatus(msg, color){
+  var el = document.getElementById('webhook-status');
+  el.textContent = msg;
+  el.style.color = 'var(--' + (color || 'dim') + ')';
+}
+
+function saveWebhook(){
+  var url = document.getElementById('webhook-inp').value.trim();
+  if(!url){
+    webhookStatus('Enter a webhook URL', 'red');
+    return;
+  }
+  if(url.indexOf('https://') !== 0){
+    webhookStatus('Must start with https://', 'red');
+    return;
+  }
+  localStorage.setItem(WEBHOOK_KEY, url);
+  registerWebhookOnServer(url);
+}
+
+function removeWebhook(){
+  var url = localStorage.getItem(WEBHOOK_KEY);
+  localStorage.removeItem(WEBHOOK_KEY);
+  document.getElementById('webhook-inp').value = '';
+  webhookRegistered = false;
+  if(url){
+    fetch('/api/webhook', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url})
+    }).then(function(){ webhookStatus('Webhook removed', 'dim'); })
+      .catch(function(){ webhookStatus('Remove failed', 'red'); });
+  } else {
+    webhookStatus('No webhook to remove', 'dim');
+  }
+}
+
+function registerWebhookOnServer(url){
+  fetch('/api/webhook', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: url})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.ok){
+      webhookRegistered = true;
+      webhookStatus('✓ Active — alerts will be sent here', 'green');
+    } else {
+      webhookStatus('Error: ' + (d.error || 'unknown'), 'red');
+    }
+  })
+  .catch(function(e){
+    webhookStatus('Registration failed: ' + e.message, 'red');
+  });
+}
+
+// On page load: restore from localStorage and register
+(function(){
+  var saved = localStorage.getItem(WEBHOOK_KEY);
+  if(saved){
+    document.getElementById('webhook-inp').value = saved;
+    registerWebhookOnServer(saved);
+  }
+})();
+
+// Heartbeat: re-register every 30 min to keep TTL alive
+setInterval(function(){
+  var saved = localStorage.getItem(WEBHOOK_KEY);
+  if(saved && webhookRegistered){
+    registerWebhookOnServer(saved);
+  }
+}, 30 * 60 * 1000);
 </script>
 </body>
 </html>`;
@@ -652,6 +780,7 @@ export class AppController {
 
   constructor(
     private readonly detector: InsiderDetectorService,
+    private readonly lark: LarkAlertService,
     private readonly scanner: WsScannerService,
     private readonly leaderboardMonitor: LeaderboardMonitorService,
   ) {}
@@ -694,5 +823,32 @@ export class AppController {
       leaderboard: this.leaderboardMonitor.getStats(),
       uptime: Date.now() - this.startedAt,
     };
+  }
+
+  // ─── Custom Lark webhook management ─────────────────────────────────────────
+
+  @Post('api/webhook')
+  @HttpCode(200)
+  registerWebhook(@Body() body: { url?: string }) {
+    const url = body?.url?.trim();
+    if (!url) {
+      return { ok: false, error: 'Missing url field' };
+    }
+    if (!url.startsWith('https://')) {
+      return { ok: false, error: 'Webhook URL must start with https://' };
+    }
+    this.lark.registerWebhook(url);
+    return { ok: true, message: 'Webhook registered', activeWebhooks: this.lark.customWebhookCount };
+  }
+
+  @Delete('api/webhook')
+  @HttpCode(200)
+  unregisterWebhook(@Body() body: { url?: string }) {
+    const url = body?.url?.trim();
+    if (!url) {
+      return { ok: false, error: 'Missing url field' };
+    }
+    const deleted = this.lark.unregisterWebhook(url);
+    return { ok: true, deleted, activeWebhooks: this.lark.customWebhookCount };
   }
 }

@@ -27,14 +27,64 @@ export class LarkAlertService {
   private sendQueue: Array<() => Promise<void>> = [];
   private isSending = false;
 
+  /**
+   * User-registered custom Lark webhook URLs.
+   * Key = webhook URL, Value = last heartbeat timestamp (ms).
+   * Entries expire after 24h of inactivity.
+   */
+  private readonly customWebhooks = new Map<string, number>();
+  private static readonly CUSTOM_WEBHOOK_TTL_MS = 24 * 3_600_000; // 24h
+
   constructor(private readonly httpService: HttpService) {}
+
+  // ─── Custom webhook management ───────────────────────────────────────────────
+
+  /** Register (or refresh) a custom webhook URL. */
+  registerWebhook(url: string): void {
+    this.customWebhooks.set(url, Date.now());
+    this.logger.log(`Custom webhook registered: ${url.slice(0, 40)}…`);
+  }
+
+  /** Unregister a custom webhook URL. */
+  unregisterWebhook(url: string): boolean {
+    const deleted = this.customWebhooks.delete(url);
+    if (deleted) this.logger.log(`Custom webhook removed: ${url.slice(0, 40)}…`);
+    return deleted;
+  }
+
+  /** Return count of active custom webhooks. */
+  get customWebhookCount(): number {
+    return this.customWebhooks.size;
+  }
+
+  /** Prune expired custom webhooks (called internally before sending). */
+  private pruneExpiredWebhooks(): void {
+    const now = Date.now();
+    for (const [url, ts] of this.customWebhooks) {
+      if (now - ts > LarkAlertService.CUSTOM_WEBHOOK_TTL_MS) {
+        this.customWebhooks.delete(url);
+        this.logger.log(`Custom webhook expired: ${url.slice(0, 40)}…`);
+      }
+    }
+  }
+
+  /** Get all webhook URLs (ENV default + custom). */
+  private getAllWebhookUrls(): string[] {
+    this.pruneExpiredWebhooks();
+    const urls: string[] = [];
+    if (larkWebhookUrl) urls.push(larkWebhookUrl);
+    for (const url of this.customWebhooks.keys()) {
+      if (url !== larkWebhookUrl) urls.push(url);
+    }
+    return urls;
+  }
 
   /**
    * Alert when a confirmed suspect (profile checked) is detected.
    * Skips if same address was alerted within cooldown window.
    */
   async alertSuspect(suspect: SuspectEntry, trigger: LargeTrade): Promise<void> {
-    if (!larkWebhookUrl) return;
+    if (!larkWebhookUrl && this.customWebhooks.size === 0) return;
 
     const lastAlert = this.cooldowns.get(suspect.address) ?? 0;
     if (Date.now() - lastAlert < larkAlertCooldownMs) return;
@@ -47,7 +97,7 @@ export class LarkAlertService {
    * Alert immediately when a MEGA trade is detected (before profile lookup).
    */
   async alertMegaTrade(trade: LargeTrade): Promise<void> {
-    if (!larkWebhookUrl) return;
+    if (!larkWebhookUrl && this.customWebhooks.size === 0) return;
 
     const key = `mega_${trade.hash}`;
     if (this.cooldowns.has(key)) return;
@@ -61,7 +111,7 @@ export class LarkAlertService {
    * This can indicate a coordinated unusual position by a known top trader.
    */
   async alertLeaderboardUnusualCoin(address: string, trade: LargeTrade, knownCoins: string[]): Promise<void> {
-    if (!larkWebhookUrl || !leaderboardAlertEnabled) return;
+    if ((!larkWebhookUrl && this.customWebhooks.size === 0) || !leaderboardAlertEnabled) return;
 
     const key = `lb_coin_${address}_${trade.coin}`;
     if (this.cooldowns.has(key)) return;
@@ -129,7 +179,7 @@ export class LarkAlertService {
    * Sent once per day at configured UTC hour.
    */
   async alertDailyFpDigest(suspects: SuspectEntry[]): Promise<void> {
-    if (!larkWebhookUrl || !fpDigestEnabled || suspects.length === 0) return;
+    if ((!larkWebhookUrl && this.customWebhooks.size === 0) || !fpDigestEnabled || suspects.length === 0) return;
 
     const rows = suspects.map((s) => {
       const archetype = s.copinProfile?.archetype ?? 'UNKNOWN';
@@ -398,27 +448,32 @@ export class LarkAlertService {
   }
 
   private async doSend(payload: object): Promise<void> {
-    try {
-      const res = await lastValueFrom(
-        this.httpService
-          .post(larkWebhookUrl, payload, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 10_000,
-          })
-          .pipe(
-            catchError((e) => {
-              this.logger.error(`Lark webhook error: ${e.message}`);
-              return of(null);
-            }),
-          ),
-      );
-      if (res?.data?.code && res.data.code !== 0) {
-        this.logger.error(`Lark returned code ${res.data.code}: ${res.data.msg}`);
-      } else if (res) {
-        this.logger.log('Lark alert sent OK');
+    const urls = this.getAllWebhookUrls();
+    if (urls.length === 0) return;
+
+    for (const url of urls) {
+      try {
+        const res = await lastValueFrom(
+          this.httpService
+            .post(url, payload, {
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 10_000,
+            })
+            .pipe(
+              catchError((e) => {
+                this.logger.error(`Lark webhook error (${url.slice(0, 40)}…): ${e.message}`);
+                return of(null);
+              }),
+            ),
+        );
+        if (res?.data?.code && res.data.code !== 0) {
+          this.logger.error(`Lark returned code ${res.data.code}: ${res.data.msg} (${url.slice(0, 40)}…)`);
+        } else if (res) {
+          this.logger.log(`Lark alert sent OK → ${url === larkWebhookUrl ? 'default' : 'custom'}`);
+        }
+      } catch (e) {
+        this.logger.error(`Lark send failed (${url.slice(0, 40)}…): ${e.message}`);
       }
-    } catch (e) {
-      this.logger.error(`Lark send failed: ${e.message}`);
     }
   }
 }
