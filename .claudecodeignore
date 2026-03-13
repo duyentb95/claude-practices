@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+
+# Data (too large for context)
+data/raw/
+data/cache/
+*.csv
+*.parquet
+
+# Git
+.git/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Large media
+*.mp4
+*.zip
+*.tar.gz
+
+# BMAD outputs (read on-demand, not auto-scanned)
+# Uncomment if .bmad/ gets too large:
+# .bmad/adhoc/
+# .bmad/templates/*.png
