@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post } from '@nestjs/common';
 import { getAddress } from 'ethers';
 import { InsiderDetectorService } from '../scanner/insider-detector.service';
 import { LarkAlertService, DEFAULT_MEGA_TIERS, MegaTierConfig } from '../scanner/lark-alert.service';
 import { WsScannerService } from '../scanner/ws-scanner.service';
 import { LeaderboardMonitorService } from '../scanner/leaderboard-monitor.service';
+import { SupabaseService } from '../frameworks/supabase/supabase.service';
 import { minTradeUsd, megaTradeUsd, copinEnabled } from '../configs';
 
 /** EIP-55 checksum address for Copin URL compatibility. */
@@ -850,6 +851,7 @@ export class AppController {
     private readonly lark: LarkAlertService,
     private readonly scanner: WsScannerService,
     private readonly leaderboardMonitor: LeaderboardMonitorService,
+    private readonly supabase: SupabaseService,
   ) {}
 
   @Get('/')
@@ -918,5 +920,47 @@ export class AppController {
     }
     const deleted = this.lark.unregisterWebhook(url);
     return { ok: true, deleted, activeWebhooks: this.lark.customWebhookCount };
+  }
+
+  // ─── Evaluation API (suspect verdict tracking) ─────────────────────────────
+
+  @Post('api/evaluate')
+  @HttpCode(200)
+  async evaluateSuspect(
+    @Body() body: { address?: string; verdict?: string; notes?: string; evaluated_by?: string },
+  ) {
+    if (!this.supabase.enabled) {
+      return { ok: false, error: 'Supabase not configured' };
+    }
+
+    const address = body?.address?.trim()?.toLowerCase();
+    if (!address) {
+      return { ok: false, error: 'Missing address field' };
+    }
+
+    const validVerdicts = ['TRUE_POSITIVE', 'FALSE_POSITIVE', 'UNCERTAIN'];
+    const verdict = body?.verdict?.toUpperCase();
+    if (!verdict || !validVerdicts.includes(verdict)) {
+      return { ok: false, error: `Invalid verdict. Must be one of: ${validVerdicts.join(', ')}` };
+    }
+
+    const ok = await this.supabase.addEvaluation({
+      address,
+      verdict: verdict as 'TRUE_POSITIVE' | 'FALSE_POSITIVE' | 'UNCERTAIN',
+      notes: body.notes,
+      evaluated_by: body.evaluated_by,
+    });
+
+    return { ok, address, verdict };
+  }
+
+  @Get('api/evaluations/:address')
+  async getEvaluations(@Param('address') address: string) {
+    if (!this.supabase.enabled) {
+      return { ok: false, error: 'Supabase not configured', evaluations: [] };
+    }
+
+    const evaluations = await this.supabase.getEvaluations(address.toLowerCase());
+    return { ok: true, address, evaluations };
   }
 }

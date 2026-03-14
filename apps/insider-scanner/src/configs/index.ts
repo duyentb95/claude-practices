@@ -81,6 +81,11 @@ export const leaderboardSize = parseInt(process.env.LEADERBOARD_SIZE || '100');
 // Whether to fire Lark alerts when a leaderboard wallet trades an unusual coin
 export const leaderboardAlertEnabled = process.env.LEADERBOARD_ALERT_ENABLED !== 'false';
 
+// ─── Supabase (persistent storage) ─────────────────────────────────────────────
+
+export const supabaseUrl = process.env.SUPABASE_URL || '';
+export const supabaseKey = process.env.SUPABASE_KEY || ''; // anon/service_role key
+
 // ─── Phase 3: FP Digest ────────────────────────────────────────────────────────
 
 // Whether to send daily FP digest alert (suspects with high FP probability)

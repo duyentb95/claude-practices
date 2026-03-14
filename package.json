@@ -33,6 +33,7 @@
     "@nestjs/terminus": "10.2.3",
     "@sentry/node": "^7.26.0",
     "@solana/web3.js": "^1.95.8",
+    "@supabase/supabase-js": "^2.99.1",
     "bignumber.js": "9.1.2",
     "cache-manager": "5.5.3",
     "cache-manager-redis-store": "3.0.1",

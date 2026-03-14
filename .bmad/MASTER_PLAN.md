@@ -28,7 +28,7 @@
 |----|------|-------|-------|--------|-------------|-----------|
 | TASK_101 | Dormant wallet reactivation detector | — | Sonnet | ⏳ | None | Yes |
 | TASK_102 | Correlated timing detection (multi-wallet same coin) | — | Opus | ⏳ | None | Yes |
-| TASK_103 | Persistent suspect storage (survive restarts) | — | Sonnet | ⏳ | None | Yes |
+| TASK_103 | Supabase integration — persistent suspects, large trades (7d), evaluations | Master (GSD) | — | ✅ | None | Yes |
 | TASK_104 | False-positive digest + feedback loop | — | Sonnet | ⏳ | None | No |
 | TASK_105 | Dashboard UX: filters, search, export CSV | — | Sonnet | ⏳ | None | No |
 | TASK_106 | Cross-wallet fund flow detection (deposit chains) | — | Opus | ⏳ | None | No |
@@ -68,6 +68,7 @@ Sprint 1 (in progress):
 | TASK_005 | 2026-03-13 | BMAD-GSD framework initialized: .bmad/, 4 skills, 6 commands, .claudecodeignore | 18 files created |
 | TASK_006 | 2026-03-14 | Weight-based rate limiter, CVD tracker, orderbook tracker, limit order support | 9 files (3 new, 6 modified) |
 | TASK_107 | 2026-03-14 | WS reconnection: exponential backoff, stale detection, coin refresh, downtime tracking | ws-scanner.service.ts, trade.dto.ts |
+| TASK_103 | 2026-03-15 | Supabase integration: persistent suspects, 7d large trades, evaluations API, daily stats | 8 files (4 new, 4 modified) |
 
 ## Blockers & Issues
 

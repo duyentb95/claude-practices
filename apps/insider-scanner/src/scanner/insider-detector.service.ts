@@ -28,6 +28,7 @@ import { HyperliquidInfoService } from '../frameworks/hyperliquid/hyperliquid-in
 import { CopinInfoService } from '../frameworks/copin/copin-info.service';
 import { LarkAlertService } from './lark-alert.service';
 import { LeaderboardMonitorService } from './leaderboard-monitor.service';
+import { SupabaseService } from '../frameworks/supabase/supabase.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -153,13 +154,16 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     private readonly copinService: CopinInfoService,
     private readonly lark: LarkAlertService,
     private readonly leaderboardMonitor: LeaderboardMonitorService,
+    private readonly supabase: SupabaseService,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     this.scanner.onTrade((raw) => this.bufferTrade(raw));
     // Warm coin tiers and Copin whitelists immediately on startup
     this.refreshCoinTiers();
     this.refreshCopinWhitelists();
+    // Restore suspects and recent trades from Supabase (survives restarts)
+    await this.loadFromSupabase();
   }
 
   onModuleDestroy() {
@@ -373,11 +377,14 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   // ─── Trade processing ─────────────────────────────────────────────────────────
 
   private processLargeTrade(trade: LargeTrade) {
-    // Keep rolling window
+    // Keep rolling window in memory (for dashboard display)
     this.largeTrades.unshift(trade);
     if (this.largeTrades.length > maxTradeHistory) {
       this.largeTrades.length = maxTradeHistory;
     }
+
+    // Persist to Supabase (non-blocking)
+    this.persistLargeTrade(trade);
 
     this.scanner.stats.largeTradesFound++;
 
@@ -913,6 +920,12 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
     this.scanner.stats.suspectsFound = this.suspects.size;
     this.scanner.stats.queueLength   = this.rateLimiter.queueLength;
+
+    // Persist to Supabase (non-blocking)
+    const suspect = this.suspects.get(address);
+    if (suspect) {
+      this.persistSuspect(suspect, scoring.components as any);
+    }
   }
 
   // ─── Daily FP Digest ──────────────────────────────────────────────────────────
@@ -953,6 +966,106 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
 
     this.lark.alertDailyFpDigest(fpCandidates).catch(() => null);
     this.addLog(`[FP DIGEST] Sent daily digest with ${fpCandidates.length} FP candidate(s)`);
+  }
+
+  // ─── Supabase persistence ────────────────────────────────────────────────────
+
+  /** Load suspects and recent trades from Supabase on startup */
+  private async loadFromSupabase() {
+    if (!this.supabase.enabled) return;
+
+    try {
+      const [suspects, trades] = await Promise.all([
+        this.supabase.loadSuspects(),
+        this.supabase.loadRecentTrades(50),
+      ]);
+
+      for (const s of suspects) {
+        this.suspects.set(s.address, s);
+      }
+      this.scanner.stats.suspectsFound = this.suspects.size;
+
+      for (const t of trades) {
+        this.largeTrades.push(t);
+      }
+
+      this.addLog(
+        `[DB] Restored ${suspects.length} suspects + ${trades.length} trades from Supabase`,
+      );
+      this.logger.log(
+        `Loaded ${suspects.length} suspects + ${trades.length} trades from Supabase`,
+      );
+    } catch (e) {
+      this.logger.warn(`loadFromSupabase failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Persist a suspect to Supabase (fire-and-forget, non-blocking) */
+  private persistSuspect(entry: SuspectEntry, components?: Record<string, number>) {
+    this.supabase.upsertSuspect(entry, components).catch((e) => {
+      this.logger.warn(`persistSuspect: ${(e as Error).message}`);
+    });
+  }
+
+  /** Persist a large trade to Supabase (fire-and-forget) */
+  private persistLargeTrade(trade: LargeTrade) {
+    this.supabase.insertLargeTrade(trade).catch((e) => {
+      this.logger.warn(`persistLargeTrade: ${(e as Error).message}`);
+    });
+  }
+
+  /** Cleanup old large trades and persist daily stats — runs daily at 00:05 UTC */
+  @Cron('5 0 * * *')
+  async dailyMaintenance() {
+    if (!this.supabase.enabled) return;
+
+    try {
+      // Cleanup old trades
+      const deleted = await this.supabase.cleanupOldTrades();
+      if (deleted > 0) {
+        this.addLog(`[DB] Cleaned up ${deleted} large trades older than 7 days`);
+      }
+
+      // Persist daily stats
+      const today = new Date().toISOString().slice(0, 10);
+      const allSuspects = [...this.suspects.values()];
+      const todaySuspects = allSuspects.filter(
+        (s) => new Date(s.lastSeenAt).toISOString().slice(0, 10) === today,
+      );
+
+      // Count coins across today's suspects for top_coins
+      const coinCounts = new Map<string, number>();
+      for (const s of todaySuspects) {
+        for (const c of s.coins) {
+          coinCounts.set(c, (coinCounts.get(c) ?? 0) + 1);
+        }
+      }
+      const topCoins = [...coinCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([coin]) => coin);
+
+      const scores = todaySuspects.map((s) => s.insiderScore);
+      const avgScore = scores.length > 0
+        ? scores.reduce((a, b) => a + b, 0) / scores.length
+        : null;
+
+      await this.supabase.upsertDailyStats({
+        date: today,
+        largeTrades: this.scanner.stats.largeTradesFound,
+        suspectsFlagged: todaySuspects.length,
+        criticalCount: todaySuspects.filter((s) => s.alertLevel === AlertLevel.CRITICAL).length,
+        highCount: todaySuspects.filter((s) => s.alertLevel === AlertLevel.HIGH).length,
+        mediumCount: todaySuspects.filter((s) => s.alertLevel === AlertLevel.MEDIUM).length,
+        lowCount: todaySuspects.filter((s) => s.alertLevel === AlertLevel.LOW).length,
+        avgScore,
+        topCoins,
+      });
+
+      this.addLog(`[DB] Daily stats persisted for ${today}`);
+    } catch (e) {
+      this.logger.warn(`dailyMaintenance failed: ${(e as Error).message}`);
+    }
   }
 
   // ─── Sorting helpers ──────────────────────────────────────────────────────────

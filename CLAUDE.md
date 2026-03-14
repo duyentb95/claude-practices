@@ -100,6 +100,8 @@ LEADERBOARD_SIZE           # default: 100
 LEADERBOARD_ALERT_ENABLED  # default: true
 FP_DIGEST_ENABLED          # default: true
 FP_DIGEST_HOUR             # default: 8 (UTC)
+SUPABASE_URL               # Supabase project URL (optional — persistence disabled if not set)
+SUPABASE_KEY               # Supabase anon or service_role key
 ```
 
 ## data-analytics Architecture
