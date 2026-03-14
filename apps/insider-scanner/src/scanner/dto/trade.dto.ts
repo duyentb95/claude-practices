@@ -160,4 +160,10 @@ export interface WsStats {
   lastMessageAt: number | null;
   subscribedCoins: number;
   queueLength: number;
+  /** Timestamp of last successful reconnection */
+  lastReconnectAt: number | null;
+  /** Total milliseconds spent disconnected since startup */
+  totalDowntimeMs: number;
+  /** Current consecutive connection failures (resets on success) */
+  consecutiveFailures: number;
 }
