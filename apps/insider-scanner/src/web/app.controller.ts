@@ -635,7 +635,7 @@ function renderSuspectRows(slice){
   function sortHdr(label,key,cls){
     var arrow = suspSortKey===key ? (suspSortAsc?'▲':'▼') : '⇅';
     var active = suspSortKey===key ? (suspSortAsc?' asc':' desc') : '';
-    return '<th class="sortable'+(cls?' '+cls:'')+active+'" onclick="sortSusp(\''+key+'\')">'+label+' <span class="sort-arrow">'+arrow+'</span></th>';
+    return '<th class="sortable'+(cls?' '+cls:'')+active+'" onclick="sortSusp(&quot;'+key+'&quot;)">'+label+' <span class="sort-arrow">'+arrow+'</span></th>';
   }
   var h = '<table><thead><tr>'
     + '<th>Wallet</th>'+sortHdr('Score','insiderScore','')+'<th>Copin</th>'+sortHdr('Total USD','totalUsd','r')+sortHdr('Trades','tradeCount','c')
@@ -778,12 +778,12 @@ function update(d){
 // ─ CSV Export ─────────────────────────────────────────────────────────────────
 function csvEscape(v){
   var s = String(v==null?'':v);
-  if(s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\\n')>=0) return '"'+s.replace(/"/g,'""')+'"';
+  if(s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\n')>=0) return '"'+s.replace(/"/g,'""')+'"';
   return s;
 }
 
 function downloadCSV(filename, rows){
-  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\\n');
+  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\n');
   var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
