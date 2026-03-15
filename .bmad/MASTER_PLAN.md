@@ -30,7 +30,7 @@
 | TASK_102 | Correlated timing detection (multi-wallet same coin) | Master (GSD) | — | ✅ | None | Yes |
 | TASK_103 | Supabase integration — persistent suspects, large trades (7d), evaluations | Master (GSD) | — | ✅ | None | Yes |
 | TASK_104 | False-positive digest + feedback loop | Master (GSD) | — | ✅ | None | No |
-| TASK_105 | Dashboard UX: filters, search, export CSV | — | Sonnet | ⏳ | None | No |
+| TASK_105 | Dashboard UX: filters, search, export CSV | Master (GSD) | — | ✅ | None | No |
 | TASK_106 | Cross-wallet fund flow detection (deposit chains) | — | Opus | ⏳ | None | No |
 | TASK_107 | WebSocket reconnection hardening | Master (GSD) | — | ✅ | None | Yes |
 | TASK_108 | Scoring engine: time-decay + cross-coin correlation | — | Opus | ⏳ | None | No |
@@ -72,6 +72,7 @@ Sprint 1 (in progress):
 | TASK_101 | 2026-03-15 | Dormant wallet reactivation: DORMANT flag, graduated scoring (+4/+6/+8), multiplier combos | trade.dto.ts, insider-detector.service.ts |
 | TASK_102 | 2026-03-15 | Correlated timing: CORREL flag, 10min window, cross-trade detection, +8 score boost, retroactive flagging | trade.dto.ts, insider-detector.service.ts |
 | TASK_104 | 2026-03-15 | FP digest with accuracy stats, evaluation API (POST /api/evaluate, GET /api/accuracy), Supabase accuracy tracking | lark-alert.service.ts, insider-detector.service.ts, supabase.service.ts, app.controller.ts |
+| TASK_105 | 2026-03-15 | Dashboard UX: alert level filter chips, column sorting, CSV export, DORMANT/CORREL flag badges | app.controller.ts |
 
 ## Blockers & Issues
 

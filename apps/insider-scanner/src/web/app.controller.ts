@@ -161,6 +161,34 @@ tr:hover td{background:var(--bg-hover)}
 .pg-btn[disabled]{opacity:.3;cursor:not-allowed}
 .pg-label{font-size:10px;color:var(--text);min-width:88px;text-align:center}
 
+/* ─ Filter chips ───────────────────────────── */
+.filter-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filter-chip{
+  background:transparent;border:1px solid var(--border);border-radius:3px;
+  color:var(--dim);cursor:pointer;font-family:inherit;font-size:10px;
+  padding:2px 8px;transition:all .15s;line-height:1.6;
+}
+.filter-chip:hover{border-color:var(--cyan);color:var(--cyan)}
+.filter-chip.active{border-color:var(--cyan);color:var(--cyan);background:rgba(57,197,207,.1)}
+.filter-chip.c-crit.active{border-color:var(--red);color:var(--red);background:rgba(248,81,73,.1)}
+.filter-chip.c-high.active{border-color:var(--orange);color:var(--orange);background:rgba(209,143,82,.1)}
+.filter-chip.c-med.active{border-color:var(--yellow);color:var(--yellow);background:rgba(210,153,34,.1)}
+.filter-chip.c-low.active{border-color:var(--blue);color:var(--blue);background:rgba(88,166,255,.1)}
+
+/* ─ Export btn ──────────────────────────────── */
+.export-btn{
+  background:transparent;border:1px solid var(--border);border-radius:3px;
+  color:var(--dim);cursor:pointer;font-family:inherit;font-size:10px;
+  padding:2px 8px;transition:all .15s;line-height:1.6;
+}
+.export-btn:hover{border-color:var(--green);color:var(--green);background:rgba(63,185,80,.05)}
+
+/* ─ Sortable headers ───────────────────────── */
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--cyan)}
+th.sortable .sort-arrow{margin-left:3px;font-size:8px;opacity:.5}
+th.sortable.asc .sort-arrow,th.sortable.desc .sort-arrow{opacity:1;color:var(--cyan)}
+
 /* ─ Bottom bar ──────────────────────────────── */
 .btmbar{
   position:fixed;bottom:0;left:0;right:0;
@@ -259,6 +287,7 @@ tr:hover td{background:var(--bg-hover)}
         <span class="card-sub" id="trades-sub">waiting…</span>
       </div>
       <div class="search-wrap">
+        <button class="export-btn" onclick="exportTradesCSV()" title="Export trades to CSV">CSV</button>
         <input id="trades-search" class="search-inp" type="text" placeholder="Filter coin, address, side, flag…"
           oninput="onTradeFilter(this.value)" autocomplete="off" spellcheck="false">
         <button id="trades-clr" class="search-clr" onclick="clearTradeFilter()" title="Clear filter">✕</button>
@@ -278,11 +307,20 @@ tr:hover td{background:var(--bg-hover)}
   <!-- Suspects -->
   <div class="card">
     <div class="card-hdr">
-      <div>
-        <span class="card-title">Suspicious Wallets</span>
-        <span class="card-sub" id="susp-sub">sorted by risk score</span>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <span class="card-title">Suspicious Wallets</span>
+          <span class="card-sub" id="susp-sub">sorted by risk score</span>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-chip c-crit" onclick="toggleLevelFilter('CRITICAL')" data-level="CRITICAL">CRITICAL</button>
+          <button class="filter-chip c-high" onclick="toggleLevelFilter('HIGH')" data-level="HIGH">HIGH</button>
+          <button class="filter-chip c-med" onclick="toggleLevelFilter('MEDIUM')" data-level="MEDIUM">MEDIUM</button>
+          <button class="filter-chip c-low" onclick="toggleLevelFilter('LOW')" data-level="LOW">LOW</button>
+        </div>
       </div>
       <div class="search-wrap">
+        <button class="export-btn" onclick="exportSuspectsCSV()" title="Export suspects to CSV">CSV</button>
         <input id="susp-search" class="search-inp" type="text" placeholder="Filter address, coin, level, type, flag…"
           oninput="onSuspFilter(this.value)" autocomplete="off" spellcheck="false">
         <button id="susp-clr" class="search-clr" onclick="clearSuspFilter()" title="Clear filter">✕</button>
@@ -330,6 +368,9 @@ var allTrades   = [];
 var allSuspects = [];
 var tradeFilter = '';
 var suspFilter  = '';
+var levelFilter = '';
+var suspSortKey = 'insiderScore';
+var suspSortAsc = false;
 
 function filteredTrades(){
   var q = tradeFilter.trim().toLowerCase();
@@ -343,16 +384,56 @@ function filteredTrades(){
 }
 
 function filteredSuspects(){
+  var list = allSuspects;
+  if(levelFilter){
+    list = list.filter(function(s){ return s.alertLevel === levelFilter; });
+  }
   var q = suspFilter.trim().toLowerCase();
-  if(!q) return allSuspects;
-  return allSuspects.filter(function(s){
-    return s.address.toLowerCase().indexOf(q) >= 0
-      || (s.coins||[]).some(function(c){ return c.toLowerCase().indexOf(q) >= 0; })
-      || (s.alertLevel||'').toLowerCase().indexOf(q) >= 0
-      || (s.walletType||'').toLowerCase().indexOf(q) >= 0
-      || (s.flags||[]).some(function(f){ return f.toLowerCase().indexOf(q) >= 0; })
-      || ((s.copinProfile&&s.copinProfile.archetype)||'').toLowerCase().indexOf(q) >= 0;
+  if(q){
+    list = list.filter(function(s){
+      return s.address.toLowerCase().indexOf(q) >= 0
+        || (s.coins||[]).some(function(c){ return c.toLowerCase().indexOf(q) >= 0; })
+        || (s.alertLevel||'').toLowerCase().indexOf(q) >= 0
+        || (s.walletType||'').toLowerCase().indexOf(q) >= 0
+        || (s.flags||[]).some(function(f){ return f.toLowerCase().indexOf(q) >= 0; })
+        || ((s.copinProfile&&s.copinProfile.archetype)||'').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  // Apply sorting
+  list = list.slice().sort(function(a,b){
+    var va = getSortVal(a, suspSortKey);
+    var vb = getSortVal(b, suspSortKey);
+    if(va < vb) return suspSortAsc ? -1 : 1;
+    if(va > vb) return suspSortAsc ? 1 : -1;
+    return 0;
   });
+  return list;
+}
+
+function getSortVal(s, key){
+  if(key==='insiderScore') return s.insiderScore||0;
+  if(key==='totalUsd') return s.totalUsd||0;
+  if(key==='tradeCount') return s.tradeCount||0;
+  if(key==='accountValue') return s.profile ? s.profile.accountValue||0 : -1;
+  if(key==='fillCount90d') return s.profile ? s.profile.fillCount90d : -1;
+  if(key==='lastSeenAt') return s.lastSeenAt||0;
+  return 0;
+}
+
+function toggleLevelFilter(lvl){
+  levelFilter = (levelFilter === lvl) ? '' : lvl;
+  suspPage = 0;
+  document.querySelectorAll('.filter-chip').forEach(function(el){
+    el.classList.toggle('active', el.getAttribute('data-level') === levelFilter);
+  });
+  renderSuspPage();
+}
+
+function sortSusp(key){
+  if(suspSortKey === key){ suspSortAsc = !suspSortAsc; }
+  else { suspSortKey = key; suspSortAsc = false; }
+  suspPage = 0;
+  renderSuspPage();
 }
 
 function onTradeFilter(val){
@@ -422,6 +503,10 @@ function flagBadges(arr){
     if(f==='SMART')      return '<span class="badge b-smart">🧠SMART</span>';
     if(f==='LINKED')     return '<span class="badge b-isusp">🔗LINKED</span>';
     if(f==='LB_COIN')    return '<span class="badge b-new">📋LB_COIN</span>';
+    if(f==='DORMANT')    return '<span class="badge b-ghost">💤DORMANT</span>';
+    if(f==='CORREL')     return '<span class="badge b-isusp">🔄CORREL</span>';
+    if(f==='VOL_SPIKE')  return '<span class="badge b-large">📈VOL_SPIKE</span>';
+    if(f==='NEW_LIST')   return '<span class="badge b-fresh">🆕NEW_LIST</span>';
     return '<span class="badge b-large">'+esc(f)+'</span>';
   }).join(' ');
 }
@@ -546,9 +631,14 @@ function tradeNext(){
 function renderSuspectRows(slice){
   if(!slice||!slice.length) return '<div class="empty">No suspects detected yet…</div>';
   var threshold = 30;
+  function sortHdr(label,key,cls){
+    var arrow = suspSortKey===key ? (suspSortAsc?'▲':'▼') : '⇅';
+    var active = suspSortKey===key ? (suspSortAsc?' asc':' desc') : '';
+    return '<th class="sortable'+(cls?' '+cls:'')+active+'" onclick="sortSusp(\''+key+'\')">'+label+' <span class="sort-arrow">'+arrow+'</span></th>';
+  }
   var h = '<table><thead><tr>'
-    + '<th>Wallet</th><th>Score</th><th>Copin</th><th class="r">Total USD</th><th class="c">Trades</th>'
-    + '<th class="r">Acct Value</th><th class="r">90d Fills</th>'
+    + '<th>Wallet</th>'+sortHdr('Score','insiderScore','')+'<th>Copin</th>'+sortHdr('Total USD','totalUsd','r')+sortHdr('Trades','tradeCount','c')
+    + sortHdr('Acct Value','accountValue','r')+sortHdr('90d Fills','fillCount90d','r')
     + '<th>Coins</th><th>Flags</th>'
     + '</tr></thead><tbody>';
 
@@ -682,6 +772,62 @@ function update(d){
 
   // Refresh time
   document.getElementById('rtime').textContent = fmtT(Date.now());
+}
+
+// ─ CSV Export ─────────────────────────────────────────────────────────────────
+function csvEscape(v){
+  var s = String(v==null?'':v);
+  if(s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\\n')>=0) return '"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+
+function downloadCSV(filename, rows){
+  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\\n');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportTradesCSV(){
+  var data = filteredTrades();
+  if(!data.length) return;
+  var rows = [['Time','Coin','Side','USD Size','Price','Fills','Taker Address','Flags']];
+  data.forEach(function(t){
+    rows.push([
+      new Date(t.time).toISOString(),
+      t.coin, t.side,
+      t.usdSize.toFixed(2), t.price,
+      t.fillCount,
+      t.takerAddress||'',
+      (t.flags||[]).join(' ')
+    ]);
+  });
+  downloadCSV('insider-trades-'+new Date().toISOString().slice(0,10)+'.csv', rows);
+}
+
+function exportSuspectsCSV(){
+  var data = filteredSuspects();
+  if(!data.length) return;
+  var rows = [['Address','Score','Alert Level','Total USD','Trades','Acct Value','90d Fills','Wallet Type','Coins','Flags','Copin Archetype','First Seen','Last Seen']];
+  data.forEach(function(s){
+    rows.push([
+      s.address,
+      s.insiderScore, s.alertLevel,
+      s.totalUsd.toFixed(2), s.tradeCount,
+      s.profile?s.profile.accountValue.toFixed(2):'',
+      s.profile?s.profile.fillCount90d:'',
+      s.walletType||'',
+      (s.coins||[]).join(' '),
+      (s.flags||[]).join(' '),
+      s.copinProfile?s.copinProfile.archetype:'',
+      new Date(s.firstSeenAt).toISOString(),
+      new Date(s.lastSeenAt).toISOString()
+    ]);
+  });
+  downloadCSV('insider-suspects-'+new Date().toISOString().slice(0,10)+'.csv', rows);
 }
 
 // ─ Polling ────────────────────────────────────────────────────────────────────
