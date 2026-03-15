@@ -41,6 +41,9 @@ export enum InsiderFlag {
 
   // Correlated timing
   CORRELATED       = 'CORREL',      // Multiple wallets trading same coin within 10 min window
+
+  // Fund flow chain
+  FUND_CHAIN       = 'FUND_CHAIN',  // Multi-hop deposit chain detected (CEX → A → B → trade)
 }
 
 export enum AlertLevel {

@@ -505,6 +505,7 @@ function flagBadges(arr){
     if(f==='LB_COIN')    return '<span class="badge b-new">📋LB_COIN</span>';
     if(f==='DORMANT')    return '<span class="badge b-ghost">💤DORMANT</span>';
     if(f==='CORREL')     return '<span class="badge b-isusp">🔄CORREL</span>';
+    if(f==='FUND_CHAIN') return '<span class="badge b-mega">🔗CHAIN</span>';
     if(f==='VOL_SPIKE')  return '<span class="badge b-large">📈VOL_SPIKE</span>';
     if(f==='NEW_LIST')   return '<span class="badge b-fresh">🆕NEW_LIST</span>';
     return '<span class="badge b-large">'+esc(f)+'</span>';

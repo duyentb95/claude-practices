@@ -144,6 +144,19 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   private isFirstTierRefresh = true;
   private static readonly NEW_LISTING_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours
 
+  /**
+   * Fund flow graph: sender → Set<receiver>.
+   * Tracks deposit/send relationships between wallets for multi-hop chain detection.
+   * When a new suspect is found, we check if any receiver in the graph is also a suspect.
+   */
+  private readonly fundFlowGraph = new Map<string, Set<string>>();
+
+  /**
+   * Reverse fund flow graph: receiver → Set<sender>.
+   * Used for retroactive chain detection when a new suspect is identified.
+   */
+  private readonly fundFlowReverse = new Map<string, Set<string>>();
+
   /** Log messages for the terminal / web UI */
   readonly logs: string[] = [];
 
@@ -536,16 +549,60 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       // Fetch ledger first (key signal: deposit-to-trade gap)
       const ledger = await this.infoService.getUserNonFundingLedger(address);
 
-      // Phase 2a: Send-graph cluster detection — check if this wallet was funded by a known suspect
+      // Phase 2a: Fund flow chain detection — record deposit relationships and detect chains
       let linkedSuspectAddress: string | null = null;
+      const senders: string[] = [];
       for (const l of ledger) {
         if (l.delta?.type === 'send' && l.delta?.user) {
           const sender = (l.delta.user as string).toLowerCase();
-          if (sender !== address.toLowerCase() && this.suspects.has(sender)) {
-            linkedSuspectAddress = sender;
-            this.addLog(`[CLUSTER] ${address.slice(0, 12)}… funded by suspect ${sender.slice(0, 12)}…`);
-            break;
+          if (sender !== address.toLowerCase()) {
+            senders.push(sender);
+            // Record in fund flow graph: sender → address
+            if (!this.fundFlowGraph.has(sender)) this.fundFlowGraph.set(sender, new Set());
+            this.fundFlowGraph.get(sender)!.add(address.toLowerCase());
+            if (!this.fundFlowReverse.has(address.toLowerCase())) this.fundFlowReverse.set(address.toLowerCase(), new Set());
+            this.fundFlowReverse.get(address.toLowerCase())!.add(sender);
+
+            // Direct link: sender is already a suspect
+            if (!linkedSuspectAddress && this.suspects.has(sender)) {
+              linkedSuspectAddress = sender;
+              this.addLog(`[CLUSTER] ${address.slice(0, 12)}… funded by suspect ${sender.slice(0, 12)}…`);
+            }
           }
+        }
+      }
+
+      // Multi-hop chain: if no direct suspect link, check if sender funded other suspects (shared funder)
+      let isFundChain = false;
+      if (!linkedSuspectAddress && senders.length > 0) {
+        for (const sender of senders) {
+          // Check: does this sender also fund other known suspects? (shared funding source)
+          const senderReceivers = this.fundFlowGraph.get(sender);
+          if (senderReceivers) {
+            for (const receiver of senderReceivers) {
+              if (receiver !== address.toLowerCase() && this.suspects.has(receiver)) {
+                linkedSuspectAddress = receiver;
+                isFundChain = true;
+                this.addLog(`[FUND_CHAIN] ${address.slice(0, 12)}… shares funder ${sender.slice(0, 12)}… with suspect ${receiver.slice(0, 12)}…`);
+                break;
+              }
+            }
+          }
+          if (linkedSuspectAddress) break;
+
+          // Check: is the sender itself funded by a suspect? (CEX → A → B chain)
+          const senderFunders = this.fundFlowReverse.get(sender);
+          if (senderFunders) {
+            for (const grandSender of senderFunders) {
+              if (this.suspects.has(grandSender)) {
+                linkedSuspectAddress = grandSender;
+                isFundChain = true;
+                this.addLog(`[FUND_CHAIN] ${address.slice(0, 12)}… ← ${sender.slice(0, 12)}… ← suspect ${grandSender.slice(0, 12)}…`);
+                break;
+              }
+            }
+          }
+          if (linkedSuspectAddress) break;
         }
       }
 
@@ -565,14 +622,18 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       // Composite scoring A+B+C+D+E+G × F
       const scoring = this.scoreTrader(trade, ledger, allFills, state, copinClass);
 
-      // Phase 2a: Cluster hit — boost score by +10 and re-compute alert level
+      // Phase 2a: Cluster hit — boost score and re-compute alert level
       if (linkedSuspectAddress) {
         scoring.extraFlags.push(InsiderFlag.LINKED_SUSPECT);
-        scoring.finalScore = Math.min(100, scoring.finalScore + 10);
+        const boost = isFundChain ? 12 : 10; // Multi-hop chains get higher boost
+        scoring.finalScore = Math.min(100, scoring.finalScore + boost);
         scoring.alertLevel = scoring.finalScore >= 75 ? AlertLevel.CRITICAL
           : scoring.finalScore >= 55 ? AlertLevel.HIGH
           : scoring.finalScore >= 40 ? AlertLevel.MEDIUM
           : scoring.finalScore >= 25 ? AlertLevel.LOW : AlertLevel.NONE;
+        if (isFundChain) {
+          scoring.extraFlags.push(InsiderFlag.FUND_CHAIN);
+        }
       }
 
       // Phase 2b: Leaderboard wallet trading an unusual coin
@@ -1021,6 +1082,62 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     if (suspect) {
       this.persistSuspect(suspect, scoring.components as any);
     }
+
+    // Retroactive fund chain detection: when a new suspect is added,
+    // check if any existing suspects received funds from the same source
+    this.retroactiveFundChainCheck(address.toLowerCase());
+  }
+
+  /**
+   * When a new suspect is identified, check the fund flow graph for:
+   * 1. Wallets that received funds from this suspect (downstream)
+   * 2. Other suspects that share the same funder (sibling wallets)
+   * Retroactively flag them with FUND_CHAIN if not already flagged.
+   */
+  private retroactiveFundChainCheck(newSuspectAddr: string) {
+    // 1. Downstream: wallets funded BY this suspect
+    const receivers = this.fundFlowGraph.get(newSuspectAddr);
+    if (receivers) {
+      for (const receiver of receivers) {
+        const existing = this.suspects.get(receiver);
+        if (existing && !existing.flags.has(InsiderFlag.FUND_CHAIN)) {
+          existing.flags.add(InsiderFlag.FUND_CHAIN);
+          existing.flags.add(InsiderFlag.LINKED_SUSPECT);
+          if (!existing.linkedSuspectAddress) existing.linkedSuspectAddress = newSuspectAddr;
+          existing.insiderScore = Math.min(100, existing.insiderScore + 8);
+          existing.alertLevel = existing.insiderScore >= 75 ? AlertLevel.CRITICAL
+            : existing.insiderScore >= 55 ? AlertLevel.HIGH
+            : existing.insiderScore >= 40 ? AlertLevel.MEDIUM
+            : existing.insiderScore >= 25 ? AlertLevel.LOW : AlertLevel.NONE;
+          this.addLog(`[FUND_CHAIN] Retroactive: ${receiver.slice(0, 12)}… linked downstream of suspect ${newSuspectAddr.slice(0, 12)}…`);
+          this.persistSuspect(existing);
+        }
+      }
+    }
+
+    // 2. Siblings: other suspects that share a funder with this suspect
+    const funders = this.fundFlowReverse.get(newSuspectAddr);
+    if (funders) {
+      for (const funder of funders) {
+        const siblingReceivers = this.fundFlowGraph.get(funder);
+        if (!siblingReceivers) continue;
+        for (const sibling of siblingReceivers) {
+          if (sibling === newSuspectAddr) continue;
+          const existing = this.suspects.get(sibling);
+          if (existing && !existing.flags.has(InsiderFlag.FUND_CHAIN)) {
+            existing.flags.add(InsiderFlag.FUND_CHAIN);
+            if (!existing.linkedSuspectAddress) existing.linkedSuspectAddress = newSuspectAddr;
+            existing.insiderScore = Math.min(100, existing.insiderScore + 6);
+            existing.alertLevel = existing.insiderScore >= 75 ? AlertLevel.CRITICAL
+              : existing.insiderScore >= 55 ? AlertLevel.HIGH
+              : existing.insiderScore >= 40 ? AlertLevel.MEDIUM
+              : existing.insiderScore >= 25 ? AlertLevel.LOW : AlertLevel.NONE;
+            this.addLog(`[FUND_CHAIN] Retroactive: ${sibling.slice(0, 12)}… shares funder ${funder.slice(0, 12)}… with new suspect`);
+            this.persistSuspect(existing);
+          }
+        }
+      }
+    }
   }
 
   // ─── Daily FP Digest ──────────────────────────────────────────────────────────
@@ -1184,6 +1301,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   private flagBonus(entry: SuspectEntry): number {
     let bonus = 0;
     if (entry.flags.has(InsiderFlag.GHOST_WALLET)) bonus += 15;
+    if (entry.flags.has(InsiderFlag.FUND_CHAIN))   bonus += 13;
     if (entry.flags.has(InsiderFlag.ONE_SHOT))     bonus += 12;
     if (entry.flags.has(InsiderFlag.CORRELATED))    bonus += 12;
     if (entry.flags.has(InsiderFlag.DORMANT))      bonus += 11;
