@@ -99,25 +99,34 @@ $$ LANGUAGE plpgsql;
 -- ─── Useful views for analytics ─────────────────────────────────────────────
 
 -- Accuracy by coin (requires evaluations)
+-- Uses latest evaluation per address to avoid double-counting
 CREATE OR REPLACE VIEW v_accuracy_by_coin AS
+WITH latest_eval AS (
+  SELECT DISTINCT ON (address) address, verdict
+  FROM evaluations
+  ORDER BY address, created_at DESC, id DESC
+)
 SELECT
-  unnest(s.coins) AS coin,
-  COUNT(DISTINCT s.id) AS flagged,
-  COUNT(DISTINCT CASE WHEN e.verdict = 'TRUE_POSITIVE' THEN s.id END) AS confirmed_tp,
-  COUNT(DISTINCT CASE WHEN e.verdict = 'FALSE_POSITIVE' THEN s.id END) AS confirmed_fp,
-  ROUND(AVG(s.insider_score)::numeric, 1) AS avg_score
-FROM suspects s
-LEFT JOIN evaluations e ON e.address = s.address
-GROUP BY unnest(s.coins)
+  coin,
+  COUNT(DISTINCT se.id) AS flagged,
+  COUNT(DISTINCT CASE WHEN le.verdict = 'TRUE_POSITIVE' THEN se.id END) AS confirmed_tp,
+  COUNT(DISTINCT CASE WHEN le.verdict = 'FALSE_POSITIVE' THEN se.id END) AS confirmed_fp,
+  ROUND(AVG(se.insider_score)::numeric, 1) AS avg_score
+FROM (
+  SELECT s.id, s.address, s.insider_score, unnest(s.coins) AS coin
+  FROM suspects s
+) se
+LEFT JOIN latest_eval le ON le.address = se.address
+GROUP BY coin
 ORDER BY flagged DESC;
 
--- Repeat offenders
+-- Repeat offenders (wallets flagged with multiple trades)
 CREATE OR REPLACE VIEW v_repeat_suspects AS
 SELECT
   address,
-  COUNT(*) AS times_updated,
-  MAX(insider_score) AS max_score,
-  MAX(alert_level) AS max_alert,
+  trade_count,
+  insider_score,
+  alert_level,
   coins,
   flags,
   first_seen_at,
