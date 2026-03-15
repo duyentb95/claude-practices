@@ -38,6 +38,9 @@ export enum InsiderFlag {
 
   // Dormant wallet reactivation
   DORMANT          = 'DORMANT',     // Wallet inactive >30d, suddenly trades (reactivation pattern)
+
+  // Correlated timing
+  CORRELATED       = 'CORREL',      // Multiple wallets trading same coin within 10 min window
 }
 
 export enum AlertLevel {

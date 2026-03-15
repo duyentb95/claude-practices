@@ -27,7 +27,7 @@
 | ID | Task | Agent | Model | Status | Dependencies | Parallel? |
 |----|------|-------|-------|--------|-------------|-----------|
 | TASK_101 | Dormant wallet reactivation detector | Master (GSD) | — | ✅ | None | Yes |
-| TASK_102 | Correlated timing detection (multi-wallet same coin) | — | Opus | ⏳ | None | Yes |
+| TASK_102 | Correlated timing detection (multi-wallet same coin) | Master (GSD) | — | ✅ | None | Yes |
 | TASK_103 | Supabase integration — persistent suspects, large trades (7d), evaluations | Master (GSD) | — | ✅ | None | Yes |
 | TASK_104 | False-positive digest + feedback loop | — | Sonnet | ⏳ | None | No |
 | TASK_105 | Dashboard UX: filters, search, export CSV | — | Sonnet | ⏳ | None | No |
@@ -70,6 +70,7 @@ Sprint 1 (in progress):
 | TASK_107 | 2026-03-14 | WS reconnection: exponential backoff, stale detection, coin refresh, downtime tracking | ws-scanner.service.ts, trade.dto.ts |
 | TASK_103 | 2026-03-15 | Supabase integration: persistent suspects, 7d large trades, evaluations API, daily stats | 8 files (4 new, 4 modified) |
 | TASK_101 | 2026-03-15 | Dormant wallet reactivation: DORMANT flag, graduated scoring (+4/+6/+8), multiplier combos | trade.dto.ts, insider-detector.service.ts |
+| TASK_102 | 2026-03-15 | Correlated timing: CORREL flag, 10min window, cross-trade detection, +8 score boost, retroactive flagging | trade.dto.ts, insider-detector.service.ts |
 
 ## Blockers & Issues
 

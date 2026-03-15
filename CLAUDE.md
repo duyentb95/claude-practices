@@ -72,7 +72,7 @@ AlertLevel: CRITICAL(≥75) | HIGH(≥55) | MEDIUM(≥40) | LOW(≥25) | NONE
 WalletType: GHOST | ONE_SHOT | FRESH | SUB_ACCOUNT | WHALE | NORMAL
 InsiderFlag: LARGE | MEGA | NEW_ACCT | FIRST | FRESH_DEP | DEP_ONLY |
              GHOST | ONE_SHOT | ALL_IN | HIGH_LEV | DEAD_MKT | HIGH_OI |
-             VOL_SPIKE | NEW_LIST | HFT | COPIN_SUSP | SMART | LINKED | LB_COIN | DORMANT
+             VOL_SPIKE | NEW_LIST | HFT | COPIN_SUSP | SMART | LINKED | LB_COIN | DORMANT | CORREL
 ```
 
 ### Environment Variables (insider-scanner)

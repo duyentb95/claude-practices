@@ -377,6 +377,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
   // ─── Trade processing ─────────────────────────────────────────────────────────
 
   private processLargeTrade(trade: LargeTrade) {
+    // Correlated timing detection: check if other addresses traded the same coin recently
+    this.detectCorrelatedTiming(trade);
+
     // Keep rolling window in memory (for dashboard display)
     this.largeTrades.unshift(trade);
     if (this.largeTrades.length > maxTradeHistory) {
@@ -403,6 +406,63 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     if (trade.takerAddress) {
       this.queueInspect(trade.takerAddress, trade);
     }
+  }
+
+  // ─── Correlated timing detection ───────────────────────────────────────────
+
+  /** Time window for correlated timing detection (10 minutes) */
+  private static readonly CORRELATION_WINDOW_MS = 10 * 60 * 1000;
+
+  /**
+   * Detect if multiple DIFFERENT wallets traded the same coin within a 10 min window.
+   * If found, flags both the new trade and the prior correlated trades as CORRELATED.
+   * Also retroactively updates any existing suspects with the CORRELATED flag.
+   */
+  private detectCorrelatedTiming(trade: LargeTrade) {
+    if (!trade.takerAddress) return;
+
+    const now = trade.detectedAt;
+    const cutoff = now - InsiderDetectorService.CORRELATION_WINDOW_MS;
+
+    // Find recent trades on the same coin by DIFFERENT addresses
+    const correlated = this.largeTrades.filter(
+      (t) =>
+        t.coin === trade.coin &&
+        t.takerAddress &&
+        t.takerAddress !== trade.takerAddress &&
+        t.detectedAt >= cutoff,
+    );
+
+    if (correlated.length === 0) return;
+
+    // Deduplicate correlated addresses
+    const correlatedAddrs = [...new Set(correlated.map((t) => t.takerAddress!))];
+
+    // Flag the incoming trade
+    if (!trade.flags.includes(InsiderFlag.CORRELATED)) {
+      trade.flags.push(InsiderFlag.CORRELATED);
+    }
+
+    // Retroactively flag prior correlated trades
+    for (const ct of correlated) {
+      if (!ct.flags.includes(InsiderFlag.CORRELATED)) {
+        ct.flags.push(InsiderFlag.CORRELATED);
+      }
+    }
+
+    // Retroactively update existing suspects with CORRELATED flag
+    for (const addr of correlatedAddrs) {
+      const suspect = this.suspects.get(addr);
+      if (suspect && !suspect.flags.has(InsiderFlag.CORRELATED)) {
+        suspect.flags.add(InsiderFlag.CORRELATED);
+        this.persistSuspect(suspect);
+      }
+    }
+
+    this.addLog(
+      `[CORRELATED] ${trade.coin}: ${correlatedAddrs.length + 1} wallets traded within 10min ` +
+      `— ${trade.takerAddress!.slice(0, 10)}… + ${correlatedAddrs.map((a) => a.slice(0, 10) + '…').join(', ')}`,
+    );
   }
 
   // ─── Profile inspection ───────────────────────────────────────────────────────
@@ -522,6 +582,18 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
           scoring.extraFlags.push(InsiderFlag.LEADERBOARD_COIN);
           this.lark.alertLeaderboardUnusualCoin(address, trade, [...knownCoins]).catch(() => null);
         }
+      }
+
+      // Correlated timing: if trade was flagged as CORRELATED in processLargeTrade, boost score
+      if (trade.flags.includes(InsiderFlag.CORRELATED)) {
+        if (!scoring.extraFlags.includes(InsiderFlag.CORRELATED)) {
+          scoring.extraFlags.push(InsiderFlag.CORRELATED);
+        }
+        scoring.finalScore = Math.min(100, scoring.finalScore + 8);
+        scoring.alertLevel = scoring.finalScore >= 75 ? AlertLevel.CRITICAL
+          : scoring.finalScore >= 55 ? AlertLevel.HIGH
+          : scoring.finalScore >= 40 ? AlertLevel.MEDIUM
+          : scoring.finalScore >= 25 ? AlertLevel.LOW : AlertLevel.NONE;
       }
 
       // Merge extra flags into trade record
@@ -824,6 +896,8 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     // Dormant wallet combos — reactivation + deposit = classic insider
     if (hasDormant && hasImmediate)                            multiplier += 0.15;
     if (hasDormant && hasAllIn)                                multiplier += 0.10;
+    // Note: CORRELATED flag is applied post-scoring in inspectTrader (not here)
+    // because it depends on cross-trade state, not individual trader profile.
     multiplier = Math.min(1.5, multiplier);
 
     // ── Wallet type classification ────────────────────────────────────────────
@@ -1095,6 +1169,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     let bonus = 0;
     if (entry.flags.has(InsiderFlag.GHOST_WALLET)) bonus += 15;
     if (entry.flags.has(InsiderFlag.ONE_SHOT))     bonus += 12;
+    if (entry.flags.has(InsiderFlag.CORRELATED))    bonus += 12;
     if (entry.flags.has(InsiderFlag.DORMANT))      bonus += 11;
     if (entry.flags.has(InsiderFlag.FRESH_DEPOSIT)) bonus += 10;
     if (entry.flags.has(InsiderFlag.FIRST_TIMER))  bonus += 8;
