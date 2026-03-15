@@ -691,6 +691,23 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       else if (allTimePnl < 0)      scoreB -= 3;
     }
 
+    // ── Dormant wallet reactivation detection ────────────────────────────────
+    // Wallet has prior history (not first-timer) but went silent for >30 days.
+    // Classic insider pattern: reuse an old wallet thinking it won't be monitored.
+    if (fills.length > 0 && fillCount === 0) {
+      // Has all-time fills but zero in last 90 days — check actual dormancy gap
+      const lastFillTime = Math.max(...fills.map(f => f.time));
+      const dormancyDays = (trade.detectedAt - lastFillTime) / (1000 * 60 * 60 * 24);
+
+      if (dormancyDays >= 30) {
+        extraFlags.push(InsiderFlag.DORMANT);
+        // Graduated score boost based on dormancy length
+        if      (dormancyDays >= 180) scoreB = Math.min(20, scoreB + 8);  // 6+ months
+        else if (dormancyDays >= 90)  scoreB = Math.min(20, scoreB + 6);  // 3+ months
+        else                          scoreB = Math.min(20, scoreB + 4);  // 1+ month
+      }
+    }
+
     scoreB = Math.min(20, Math.max(-8, scoreB));
 
     // ── [C] Trade Size vs Market Context (0–20 pts) ──────────────────────────
@@ -795,6 +812,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     const hasAllIn        = extraFlags.includes(InsiderFlag.ALL_IN);
     const hasDeadMarket   = extraFlags.includes(InsiderFlag.DEAD_MARKET);
     const hasCopinSuspect = extraFlags.includes(InsiderFlag.COPIN_SUSPICIOUS);
+    const hasDormant      = extraFlags.includes(InsiderFlag.DORMANT);
 
     if (hasImmediate && hasFreshWallet)                        multiplier += 0.20;
     if (hasImmediate && hasAllIn)                              multiplier += 0.15;
@@ -803,6 +821,9 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     // Copin combos (v3.0)
     if (hasCopinSuspect && hasImmediate)                       multiplier += 0.10;
     if (hasCopinSuspect && hasFreshWallet && hasAllIn)         multiplier += 0.15;
+    // Dormant wallet combos — reactivation + deposit = classic insider
+    if (hasDormant && hasImmediate)                            multiplier += 0.15;
+    if (hasDormant && hasAllIn)                                multiplier += 0.10;
     multiplier = Math.min(1.5, multiplier);
 
     // ── Wallet type classification ────────────────────────────────────────────
@@ -1074,6 +1095,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
     let bonus = 0;
     if (entry.flags.has(InsiderFlag.GHOST_WALLET)) bonus += 15;
     if (entry.flags.has(InsiderFlag.ONE_SHOT))     bonus += 12;
+    if (entry.flags.has(InsiderFlag.DORMANT))      bonus += 11;
     if (entry.flags.has(InsiderFlag.FRESH_DEPOSIT)) bonus += 10;
     if (entry.flags.has(InsiderFlag.FIRST_TIMER))  bonus += 8;
     if (entry.flags.has(InsiderFlag.ALL_IN))        bonus += 6;

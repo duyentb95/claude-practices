@@ -35,6 +35,9 @@ export enum InsiderFlag {
   // Phase 2 cluster + leaderboard flags
   LINKED_SUSPECT   = 'LINKED',      // Depositor/controller is already a known suspect
   LEADERBOARD_COIN = 'LB_COIN',     // Leaderboard wallet trading an unusual coin
+
+  // Dormant wallet reactivation
+  DORMANT          = 'DORMANT',     // Wallet inactive >30d, suddenly trades (reactivation pattern)
 }
 
 export enum AlertLevel {
