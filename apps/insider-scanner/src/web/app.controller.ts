@@ -778,12 +778,12 @@ function update(d){
 // ─ CSV Export ─────────────────────────────────────────────────────────────────
 function csvEscape(v){
   var s = String(v==null?'':v);
-  if(s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\n')>=0) return '"'+s.replace(/"/g,'""')+'"';
+  if(s.indexOf(',')>=0||s.indexOf('"')>=0||s.indexOf('\\n')>=0) return '"'+s.replace(/"/g,'""')+'"';
   return s;
 }
 
 function downloadCSV(filename, rows){
-  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\n');
+  var csv = rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\\n');
   var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
