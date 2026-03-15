@@ -52,7 +52,7 @@ Composite score A+B+C+D+E × F (0–100):
 
 | Component | Max | Signal |
 |-----------|-----|--------|
-| A: Deposit-to-Trade Speed | 25 | Gap between last deposit and trade detection time |
+| A: Deposit-to-Trade Speed | 25 | Exponential decay (30min half-life): 25×e^(-λ×min) |
 | B: Wallet Freshness | 20 | Wallet age + 90-day fill count |
 | C: Trade Size vs Market | 20 | Notional vs 24h volume + OI ratio |
 | D: Position Concentration | 15 | Margin utilization + implied leverage |

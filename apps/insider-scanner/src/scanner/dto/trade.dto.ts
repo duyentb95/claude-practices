@@ -107,12 +107,13 @@ export interface InsiderScore {
   depositToTradeGapMs: number | null;  // null = no deposit found in ledger
   extraFlags: InsiderFlag[];
   components: {
-    scoreA: number;   // Deposit-to-Trade Speed   0-25
+    scoreA: number;   // Deposit-to-Trade Speed   0-25 (exponential decay, 30min half-life)
     scoreB: number;   // Wallet Freshness         0-20
     scoreC: number;   // Trade Size vs Market     0-20
     scoreD: number;   // Position Concentration   0-15
     scoreE: number;   // Ledger Purity            0-10
     scoreG: number;   // Copin Behavioral Score   -10 to +15
+    crossCoinBonus: number; // Cross-coin correlation 0-10
     multiplier: number;
   };
 }

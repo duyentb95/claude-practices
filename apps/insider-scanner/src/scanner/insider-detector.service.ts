@@ -742,26 +742,25 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       : Date.now();
     const walletAgeDays = (Date.now() - firstActivity) / (1000 * 60 * 60 * 24);
 
-    // ── [A] Deposit-to-Trade Speed (0–25 pts) ────────────────────────────────
+    // ── [A] Deposit-to-Trade Speed (0–25 pts) — exponential time decay ────────
+    // Uses exponential decay: score = 25 × e^(-λ×minutes), λ = ln(2)/30
+    // Half-life = 30 min: score ≈ 25 at 0 min, ~12.5 at 30 min, ~6.25 at 60 min, ~0.4 at 3h
+    // Smoother and more accurate than step-function thresholds.
 
     let scoreA = 0;
     let depositToTradeGapMs: number | null = null;
 
     if (lastDepositTime > 0) {
-      // Use detectedAt (scanner detection time ≈ now) instead of trade.time
-      // because the WS channel may replay historical fills on connect, making
-      // trade.time stale while the ledger always reflects current state.
       const gapMs = trade.detectedAt - lastDepositTime;
       depositToTradeGapMs = gapMs;
       const gapMin = gapMs / 60_000;
 
-      if      (gapMin <= 5)    scoreA = 25;
-      else if (gapMin <= 15)   scoreA = 22;
-      else if (gapMin <= 30)   scoreA = 18;
-      else if (gapMin <= 60)   scoreA = 14;
-      else if (gapMin <= 180)  scoreA = 10;
-      else if (gapMin <= 360)  scoreA =  6;
-      else if (gapMin <= 1440) scoreA =  3;
+      // Exponential decay with 30-min half-life, max 25 pts
+      const DECAY_LAMBDA = Math.LN2 / 30; // ~0.0231
+      scoreA = Math.round(25 * Math.exp(-DECAY_LAMBDA * gapMin));
+
+      // Floor: anything beyond 24h gets 0
+      if (gapMin > 1440) scoreA = 0;
 
       if (gapMin <= 5) extraFlags.push(InsiderFlag.FRESH_DEPOSIT);
 
@@ -981,9 +980,24 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       walletType = WalletType.NORMAL;
     }
 
-    // ── Final score (A+B+C+D+E+G) × F, capped 100 ───────────────────────────
+    // ── Cross-coin correlation bonus ──────────────────────────────────────────
+    // If this wallet is already a suspect with trades on OTHER coins, the new
+    // trade on a different coin is more suspicious (insider trades multiple coins).
+    let crossCoinBonus = 0;
+    const existingSuspect = this.suspects.get((trade.takerAddress ?? '').toLowerCase());
+    if (existingSuspect) {
+      const priorCoins = new Set(existingSuspect.coins);
+      if (!priorCoins.has(trade.coin) && priorCoins.size >= 1) {
+        // Graduated bonus: more prior coins = higher suspicion
+        if      (priorCoins.size >= 3) crossCoinBonus = 10;
+        else if (priorCoins.size >= 2) crossCoinBonus = 7;
+        else                           crossCoinBonus = 4;
+      }
+    }
 
-    const rawScore   = scoreA + scoreB + scoreC + scoreD + scoreE + scoreG;
+    // ── Final score (A+B+C+D+E+G+crossCoin) × F, capped 100 ────────────────
+
+    const rawScore   = scoreA + scoreB + scoreC + scoreD + scoreE + scoreG + crossCoinBonus;
     const finalScore = Math.min(100, Math.round(rawScore * multiplier));
 
     let alertLevel: AlertLevel;
@@ -999,7 +1013,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       walletType,
       depositToTradeGapMs,
       extraFlags,
-      components: { scoreA, scoreB, scoreC, scoreD, scoreE, scoreG, multiplier },
+      components: { scoreA, scoreB, scoreC, scoreD, scoreE, scoreG, crossCoinBonus, multiplier },
     };
   }
 
