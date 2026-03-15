@@ -244,7 +244,7 @@ export class LarkAlertService {
    * false-positive indicators (established smart traders, degens, volume-spike days).
    * Sent once per day at configured UTC hour.
    */
-  async alertDailyFpDigest(suspects: SuspectEntry[]): Promise<void> {
+  async alertDailyFpDigest(suspects: SuspectEntry[], accuracySummary?: string): Promise<void> {
     if ((!larkWebhookUrl && this.customWebhooks.size === 0) || !fpDigestEnabled || suspects.length === 0) return;
 
     const rows = suspects.map((s) => {
@@ -254,6 +254,30 @@ export class LarkAlertService {
       return `• \`${addr}\` — ${s.alertLevel} ${s.insiderScore}/100 · ${archetype} · ${flags}`;
     }).join('\n');
 
+    const elements: any[] = [
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: `Suspects with HIGH/CRITICAL score but FP indicators:\n${rows}`,
+        },
+      },
+    ];
+
+    if (accuracySummary) {
+      elements.push({ tag: 'hr' });
+      elements.push({
+        tag: 'div',
+        text: { tag: 'lark_md', content: `📊 **Accuracy Stats**\n${accuracySummary}` },
+      });
+    }
+
+    elements.push({ tag: 'hr' });
+    elements.push({
+      tag: 'note',
+      elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
+    });
+
     this.enqueue({
       msg_type: 'interactive',
       card: {
@@ -262,20 +286,7 @@ export class LarkAlertService {
           title: { content: `🧹 Daily FP Digest — ${suspects.length} potential false positive(s)`, tag: 'plain_text' },
           template: 'grey',
         },
-        elements: [
-          {
-            tag: 'div',
-            text: {
-              tag: 'lark_md',
-              content: `Suspects with HIGH/CRITICAL score but FP indicators:\n${rows}`,
-            },
-          },
-          { tag: 'hr' },
-          {
-            tag: 'note',
-            elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
-          },
-        ],
+        elements,
       },
     });
   }

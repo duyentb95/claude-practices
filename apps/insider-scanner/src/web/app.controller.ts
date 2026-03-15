@@ -963,4 +963,22 @@ export class AppController {
     const evaluations = await this.supabase.getEvaluations(address.toLowerCase());
     return { ok: true, address, evaluations };
   }
+
+  @Get('api/accuracy')
+  async getAccuracy() {
+    if (!this.supabase.enabled) {
+      return { ok: false, error: 'Supabase not configured' };
+    }
+
+    const [stats, byLevel] = await Promise.all([
+      this.supabase.getAccuracyStats(),
+      this.supabase.getAccuracyByAlertLevel(),
+    ]);
+
+    return {
+      ok: true,
+      ...stats,
+      byAlertLevel: byLevel,
+    };
+  }
 }

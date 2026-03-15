@@ -1032,7 +1032,7 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
    * sends a digest card to Lark so operators can review and whitelist if needed.
    */
   @Cron(`0 ${fpDigestHour} * * *`)
-  sendDailyFpDigest(): void {
+  async sendDailyFpDigest(): Promise<void> {
     if (!fpDigestEnabled) return;
 
     const fpCandidates = [...this.suspects.values()].filter((s) => {
@@ -1059,7 +1059,23 @@ export class InsiderDetectorService implements OnModuleInit, OnModuleDestroy {
       return false;
     });
 
-    this.lark.alertDailyFpDigest(fpCandidates).catch(() => null);
+    // Fetch accuracy stats from Supabase for the digest
+    let accuracySummary = '';
+    if (this.supabase.enabled) {
+      try {
+        const stats = await this.supabase.getAccuracyStats();
+        if (stats.total > 0) {
+          const tpPct = stats.tpRate !== null ? `${Math.round(stats.tpRate * 100)}%` : 'N/A';
+          accuracySummary = `\n📊 Accuracy: ${stats.total} evaluated — TP: ${stats.truePositive}, FP: ${stats.falsePositive}, Rate: ${tpPct}`;
+        } else {
+          accuracySummary = '\n📊 No evaluations yet — use POST /api/evaluate to rate suspects';
+        }
+      } catch {
+        // Non-critical, continue without accuracy stats
+      }
+    }
+
+    this.lark.alertDailyFpDigest(fpCandidates, accuracySummary).catch(() => null);
     this.addLog(`[FP DIGEST] Sent daily digest with ${fpCandidates.length} FP candidate(s)`);
   }
 

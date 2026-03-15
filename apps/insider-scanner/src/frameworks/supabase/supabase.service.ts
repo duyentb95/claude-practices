@@ -282,6 +282,96 @@ export class SupabaseService implements OnModuleInit {
     return data ?? [];
   }
 
+  // ─── Accuracy Stats ────────────────────────────────────────────────────────
+
+  /** Get overall accuracy stats from evaluations */
+  async getAccuracyStats(): Promise<{
+    total: number;
+    truePositive: number;
+    falsePositive: number;
+    uncertain: number;
+    tpRate: number | null;
+    recentEvaluations: any[];
+  }> {
+    if (!this.client) {
+      return { total: 0, truePositive: 0, falsePositive: 0, uncertain: 0, tpRate: null, recentEvaluations: [] };
+    }
+
+    const { data, error } = await this.client
+      .from('evaluations')
+      .select('verdict, address, created_at, notes')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      this.logger.warn(`getAccuracyStats failed: ${error?.message}`);
+      return { total: 0, truePositive: 0, falsePositive: 0, uncertain: 0, tpRate: null, recentEvaluations: [] };
+    }
+
+    // Deduplicate: use latest evaluation per address
+    const latestByAddr = new Map<string, any>();
+    for (const row of data) {
+      if (!latestByAddr.has(row.address)) {
+        latestByAddr.set(row.address, row);
+      }
+    }
+
+    const evaluations = [...latestByAddr.values()];
+    const tp = evaluations.filter((e) => e.verdict === 'TRUE_POSITIVE').length;
+    const fp = evaluations.filter((e) => e.verdict === 'FALSE_POSITIVE').length;
+    const uc = evaluations.filter((e) => e.verdict === 'UNCERTAIN').length;
+    const decided = tp + fp;
+
+    return {
+      total: evaluations.length,
+      truePositive: tp,
+      falsePositive: fp,
+      uncertain: uc,
+      tpRate: decided > 0 ? tp / decided : null,
+      recentEvaluations: data.slice(0, 10),
+    };
+  }
+
+  /** Get accuracy breakdown by alert level */
+  async getAccuracyByAlertLevel(): Promise<any[]> {
+    if (!this.client) return [];
+
+    const { data: evalData } = await this.client
+      .from('evaluations')
+      .select('address, verdict');
+
+    if (!evalData) return [];
+
+    // Build address → latest verdict map
+    const verdictMap = new Map<string, string>();
+    for (const e of evalData) {
+      verdictMap.set(e.address, e.verdict);
+    }
+
+    const { data: suspects } = await this.client
+      .from('suspects')
+      .select('address, alert_level, insider_score');
+
+    if (!suspects) return [];
+
+    // Group by alert level
+    const levels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+    return levels.map((level) => {
+      const inLevel = suspects.filter((s: any) => s.alert_level === level);
+      const evaluated = inLevel.filter((s: any) => verdictMap.has(s.address));
+      const tp = evaluated.filter((s: any) => verdictMap.get(s.address) === 'TRUE_POSITIVE').length;
+      const fp = evaluated.filter((s: any) => verdictMap.get(s.address) === 'FALSE_POSITIVE').length;
+      const decided = tp + fp;
+      return {
+        alertLevel: level,
+        total: inLevel.length,
+        evaluated: evaluated.length,
+        truePositive: tp,
+        falsePositive: fp,
+        tpRate: decided > 0 ? Math.round((tp / decided) * 100) : null,
+      };
+    });
+  }
+
   // ─── Daily Stats ──────────────────────────────────────────────────────────
 
   /** Upsert daily aggregated stats */
