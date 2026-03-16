@@ -265,6 +265,12 @@ th.sortable.asc .sort-arrow,th.sortable.desc .sort-arrow{opacity:1;color:var(--c
     <button class="settings-btn danger" onclick="removeWebhook()">Remove</button>
     <span class="settings-status" id="webhook-status"></span>
   </div>
+  <div class="settings-row" style="margin-top:8px">
+    <span class="stat-lbl" style="min-width:90px">Sign Secret</span>
+    <input id="webhook-secret" class="settings-inp" type="password" style="width:280px"
+      placeholder="Lark bot signing secret (optional)" autocomplete="off" spellcheck="false">
+    <span class="cd f10">Required if bot has signature verification enabled</span>
+  </div>
   <div class="settings-row" id="tier-config-row" style="margin-top:8px;display:none">
     <span class="stat-lbl" style="min-width:90px">Mega Tiers</span>
     <span class="cd f10" style="min-width:100px">BTC/ETH/SOL $</span>
@@ -849,6 +855,7 @@ setInterval(poll, 2000);
 // ─ Settings: custom Lark webhook + tier config ─────────────────────────────
 var WEBHOOK_KEY = 'insider_scanner_lark_webhook';
 var TIER_KEY    = 'insider_scanner_mega_tiers';
+var SECRET_KEY  = 'insider_scanner_webhook_secret';
 var webhookRegistered = false;
 
 // Default tiers (must match server DEFAULT_MEGA_TIERS)
@@ -905,7 +912,10 @@ function saveWebhook(){
   localStorage.setItem(WEBHOOK_KEY, url);
   var tiers = getTierValues();
   localStorage.setItem(TIER_KEY, JSON.stringify(tiers));
-  registerWebhookOnServer(url, tiers);
+  var secret = document.getElementById('webhook-secret').value.trim();
+  if(secret) localStorage.setItem(SECRET_KEY, secret);
+  else localStorage.removeItem(SECRET_KEY);
+  registerWebhookOnServer(url, tiers, secret || undefined);
 }
 
 function saveTierConfig(){
@@ -949,7 +959,9 @@ function removeWebhook(){
   var url = localStorage.getItem(WEBHOOK_KEY);
   localStorage.removeItem(WEBHOOK_KEY);
   localStorage.removeItem(TIER_KEY);
+  localStorage.removeItem(SECRET_KEY);
   document.getElementById('webhook-inp').value = '';
+  document.getElementById('webhook-secret').value = '';
   webhookRegistered = false;
   showTierConfig(false);
   if(url){
@@ -964,9 +976,10 @@ function removeWebhook(){
   }
 }
 
-function registerWebhookOnServer(url, tiers){
+function registerWebhookOnServer(url, tiers, secret){
   var body = { url: url };
   if(tiers) body.megaTiers = tiers;
+  if(secret) body.secret = secret;
   fetch('/api/webhook', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -995,7 +1008,9 @@ function registerWebhookOnServer(url, tiers){
     document.getElementById('webhook-inp').value = saved;
     var tiers = null;
     try { tiers = JSON.parse(localStorage.getItem(TIER_KEY)); } catch(e){}
-    registerWebhookOnServer(saved, tiers);
+    var secret = localStorage.getItem(SECRET_KEY) || undefined;
+    if(secret) document.getElementById('webhook-secret').value = secret;
+    registerWebhookOnServer(saved, tiers, secret);
   }
   loadTierInputs();
 })();
@@ -1006,7 +1021,8 @@ setInterval(function(){
   if(saved && webhookRegistered){
     var tiers = null;
     try { tiers = JSON.parse(localStorage.getItem(TIER_KEY)); } catch(e){}
-    registerWebhookOnServer(saved, tiers);
+    var secret = localStorage.getItem(SECRET_KEY) || undefined;
+    registerWebhookOnServer(saved, tiers, secret);
   }
 }, 30 * 60 * 1000);
 </script>
@@ -1072,7 +1088,7 @@ export class AppController {
 
   @Post('api/webhook')
   @HttpCode(200)
-  registerWebhook(@Body() body: { url?: string; megaTiers?: Partial<MegaTierConfig> }) {
+  registerWebhook(@Body() body: { url?: string; megaTiers?: Partial<MegaTierConfig>; secret?: string }) {
     const url = body?.url?.trim();
     if (!url) {
       return { ok: false, error: 'Missing url field' };
@@ -1080,7 +1096,7 @@ export class AppController {
     if (!url.startsWith('https://')) {
       return { ok: false, error: 'Webhook URL must start with https://' };
     }
-    this.lark.registerWebhook(url, body.megaTiers);
+    this.lark.registerWebhook(url, body.megaTiers, body.secret);
     return { ok: true, message: 'Webhook registered', activeWebhooks: this.lark.customWebhookCount };
   }
 

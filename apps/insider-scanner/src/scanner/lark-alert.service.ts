@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { getAddress } from 'ethers';
+import { createHmac } from 'crypto';
 import { lastValueFrom, catchError, of } from 'rxjs';
 import { larkWebhookUrl, larkAlertCooldownMs, leaderboardAlertEnabled, fpDigestEnabled } from '../configs';
 import { AlertLevel, InsiderFlag, LargeTrade, SuspectEntry } from './dto/trade.dto';
@@ -30,6 +31,7 @@ export const DEFAULT_MEGA_TIERS: MegaTierConfig = {
 interface CustomWebhookEntry {
   lastHeartbeat: number;
   megaTiers: MegaTierConfig;
+  secret: string | null;
 }
 
 /** Convert hex address to EIP-55 checksum for Copin URLs. */
@@ -61,16 +63,17 @@ export class LarkAlertService {
 
   // ─── Custom webhook management ───────────────────────────────────────────────
 
-  /** Register (or refresh) a custom webhook URL with optional tier config. */
-  registerWebhook(url: string, megaTiers?: Partial<MegaTierConfig>): void {
+  /** Register (or refresh) a custom webhook URL with optional tier config and signing secret. */
+  registerWebhook(url: string, megaTiers?: Partial<MegaTierConfig>, secret?: string): void {
     const existing = this.customWebhooks.get(url);
     const tiers: MegaTierConfig = {
       bluechip: megaTiers?.bluechip ?? existing?.megaTiers.bluechip ?? DEFAULT_MEGA_TIERS.bluechip,
       midcap:   megaTiers?.midcap   ?? existing?.megaTiers.midcap   ?? DEFAULT_MEGA_TIERS.midcap,
       lowcap:   megaTiers?.lowcap   ?? existing?.megaTiers.lowcap   ?? DEFAULT_MEGA_TIERS.lowcap,
     };
-    this.customWebhooks.set(url, { lastHeartbeat: Date.now(), megaTiers: tiers });
-    this.logger.log(`Custom webhook registered: ${url.slice(0, 40)}… tiers=${JSON.stringify(tiers)}`);
+    const resolvedSecret = secret ?? existing?.secret ?? null;
+    this.customWebhooks.set(url, { lastHeartbeat: Date.now(), megaTiers: tiers, secret: resolvedSecret });
+    this.logger.log(`Custom webhook registered: ${url.slice(0, 40)}… tiers=${JSON.stringify(tiers)} signed=${!!resolvedSecret}`);
   }
 
   /** Get the config for a custom webhook (null if not registered). */
@@ -294,32 +297,36 @@ export class LarkAlertService {
   /** Send a test alert to a specific webhook URL (bypasses queue and cooldown). */
   async sendTestAlert(url: string): Promise<boolean> {
     try {
+      const entry = this.customWebhooks.get(url);
+      const secret = entry?.secret ?? null;
+      const payload = this.buildSignedPayload({
+        msg_type: 'interactive',
+        card: {
+          config: { wide_screen_mode: true },
+          header: {
+            title: { content: '🧪 Webhook Test — Insider Scanner', tag: 'plain_text' },
+            template: 'green',
+          },
+          elements: [
+            {
+              tag: 'div',
+              text: {
+                tag: 'lark_md',
+                content: `**Test successful!**\nYour webhook is connected and receiving alerts.\nSigning: ${secret ? 'enabled' : 'disabled'}\nCustom webhooks: ${this.customWebhooks.size} active`,
+              },
+            },
+            { tag: 'hr' },
+            {
+              tag: 'note',
+              elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
+            },
+          ],
+        },
+      }, secret);
+
       const res = await lastValueFrom(
         this.httpService
-          .post(url, {
-            msg_type: 'interactive',
-            card: {
-              config: { wide_screen_mode: true },
-              header: {
-                title: { content: '🧪 Webhook Test — Insider Scanner', tag: 'plain_text' },
-                template: 'green',
-              },
-              elements: [
-                {
-                  tag: 'div',
-                  text: {
-                    tag: 'lark_md',
-                    content: `**Test successful!**\nYour webhook is connected and receiving alerts.\nCustom webhooks: ${this.customWebhooks.size} active`,
-                  },
-                },
-                { tag: 'hr' },
-                {
-                  tag: 'note',
-                  elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
-                },
-              ],
-            },
-          }, {
+          .post(url, payload, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 10_000,
           })
@@ -577,15 +584,35 @@ export class LarkAlertService {
     this.isSending = false;
   }
 
+  /** Generate Lark webhook signature: Base64(HMAC-SHA256(timestamp\nsecret, secret)) */
+  private signPayload(secret: string): { timestamp: string; sign: string } {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const stringToSign = `${timestamp}\n${secret}`;
+    const sign = createHmac('sha256', stringToSign).update('').digest('base64');
+    return { timestamp, sign };
+  }
+
+  /** Build the final payload with optional signature fields. */
+  private buildSignedPayload(payload: object, secret: string | null): object {
+    if (!secret) return payload;
+    const { timestamp, sign } = this.signPayload(secret);
+    return { timestamp, sign, ...payload };
+  }
+
   private async doSend(payload: object, targetUrls?: string[]): Promise<void> {
     const urls = targetUrls ?? this.getAllWebhookUrls();
     if (urls.length === 0) return;
 
     for (const url of urls) {
       try {
+        // Look up secret for this webhook (custom webhooks may have signing)
+        const entry = this.customWebhooks.get(url);
+        const secret = entry?.secret ?? null;
+        const signedPayload = this.buildSignedPayload(payload, secret);
+
         const res = await lastValueFrom(
           this.httpService
-            .post(url, payload, {
+            .post(url, signedPayload, {
               headers: { 'Content-Type': 'application/json' },
               timeout: 10_000,
             })
@@ -602,7 +629,7 @@ export class LarkAlertService {
           this.logger.log(`Lark alert sent OK → ${url === larkWebhookUrl ? 'default' : 'custom'}`);
         }
       } catch (e) {
-        this.logger.error(`Lark send failed (${url.slice(0, 40)}…): ${e.message}`);
+        this.logger.error(`Lark send failed (${url.slice(0, 40)}…): ${(e as Error).message}`);
       }
     }
   }
