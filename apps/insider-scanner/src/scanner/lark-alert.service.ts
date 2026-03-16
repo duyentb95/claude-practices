@@ -291,6 +291,53 @@ export class LarkAlertService {
     });
   }
 
+  /** Send a test alert to a specific webhook URL (bypasses queue and cooldown). */
+  async sendTestAlert(url: string): Promise<boolean> {
+    try {
+      const res = await lastValueFrom(
+        this.httpService
+          .post(url, {
+            msg_type: 'interactive',
+            card: {
+              config: { wide_screen_mode: true },
+              header: {
+                title: { content: '🧪 Webhook Test — Insider Scanner', tag: 'plain_text' },
+                template: 'green',
+              },
+              elements: [
+                {
+                  tag: 'div',
+                  text: {
+                    tag: 'lark_md',
+                    content: `**Test successful!**\nYour webhook is connected and receiving alerts.\nCustom webhooks: ${this.customWebhooks.size} active`,
+                  },
+                },
+                { tag: 'hr' },
+                {
+                  tag: 'note',
+                  elements: [{ tag: 'plain_text', content: `Hyperliquid Insider Scanner • ${utcTime(Date.now())}` }],
+                },
+              ],
+            },
+          }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 10_000,
+          })
+          .pipe(catchError((e) => {
+            this.logger.error(`Test webhook failed: ${e.message}`);
+            return of(null);
+          })),
+      );
+      if (res?.data?.code && res.data.code !== 0) {
+        this.logger.error(`Test webhook Lark error: code=${res.data.code} msg=${res.data.msg}`);
+        return false;
+      }
+      return res !== null;
+    } catch {
+      return false;
+    }
+  }
+
   // ─── Card builders ────────────────────────────────────────────────────────────
 
   private buildSuspectCard(suspect: SuspectEntry, trigger: LargeTrade): object {

@@ -261,6 +261,7 @@ th.sortable.asc .sort-arrow,th.sortable.desc .sort-arrow{opacity:1;color:var(--c
       placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/..."
       autocomplete="off" spellcheck="false">
     <button class="settings-btn" onclick="saveWebhook()">Save</button>
+    <button class="settings-btn" onclick="testWebhook()" style="border-color:var(--green);color:var(--green)">Test</button>
     <button class="settings-btn danger" onclick="removeWebhook()">Remove</button>
     <span class="settings-status" id="webhook-status"></span>
   </div>
@@ -919,6 +920,31 @@ function saveTierConfig(){
   tierStatus('✓ Tiers updated', 'green');
 }
 
+function testWebhook(){
+  var url = document.getElementById('webhook-inp').value.trim();
+  if(!url){
+    webhookStatus('Enter a webhook URL first', 'red');
+    return;
+  }
+  webhookStatus('Sending test…', 'cyan');
+  fetch('/api/webhook/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: url})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.ok){
+      webhookStatus('Test sent! Check your Lark', 'green');
+    } else {
+      webhookStatus('Test failed: ' + (d.error || 'unknown'), 'red');
+    }
+  })
+  .catch(function(e){
+    webhookStatus('Test failed: ' + e.message, 'red');
+  });
+}
+
 function removeWebhook(){
   var url = localStorage.getItem(WEBHOOK_KEY);
   localStorage.removeItem(WEBHOOK_KEY);
@@ -1127,5 +1153,17 @@ export class AppController {
       ...stats,
       byAlertLevel: byLevel,
     };
+  }
+
+  @Post('api/webhook/test')
+  @HttpCode(200)
+  async testWebhook(@Body() body: { url?: string }) {
+    const url = body?.url?.trim();
+    if (!url) {
+      return { ok: false, error: 'Missing url field' };
+    }
+
+    const result = await this.lark.sendTestAlert(url);
+    return { ok: result, url: url.slice(0, 40) + '…' };
   }
 }
